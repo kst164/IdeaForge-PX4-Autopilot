@@ -243,8 +243,9 @@ void Sih::parameters_updated()
 	_KDW = _sih_kdw.get();
 	_H0 = _sih_h0.get();
 
-	_LAT0 = (double)_sih_lat0.get();
-	_LON0 = (double)_sih_lon0.get();
+	// _LAT0 = (double)_sih_lat0.get();
+	// _LON0 = (double)_sih_lon0.get();
+	_LAT0 = 7.0;
 	_COS_LAT0 = cosl((long double)radians(_LAT0));
 
 	_MASS = _sih_mass.get();
@@ -272,7 +273,10 @@ void Sih::init_variables()
 
 	_p_I = Vector3f(0.0f, 0.0f, 0.0f);
 	_v_I = Vector3f(0.0f, 0.0f, 0.0f);
+	_p_E = Vector3d(_ecef.a, 0.0, 0.0);
+	_v_E = Vector3f(0.0f, 0.0f, 0.0f);
 	_q = Quatf(1.0f, 0.0f, 0.0f, 0.0f);
+	_q_E = Quatf(0.7071068, 0.0f, -0.7071068, 0.0f);
 	_w_B = Vector3f(0.0f, 0.0f, 0.0f);
 
 	_u[0] = _u[1] = _u[2] = _u[3] = 0.0f;
@@ -325,7 +329,7 @@ void Sih::generate_force_and_torques()
 
 void Sih::generate_fw_aerodynamics()
 {
-	_v_B = _C_IB.transpose() * _v_I; 	// velocity in body frame [m/s]
+	_v_B = Dcmf(_C_ES * _C_SB).transpose() * _v_E;	// velocity in body frame [m/s]
 	float altitude = _H0 - _p_I(2);
 	_wing_l.update_aero(_v_B, _w_B, altitude, _u[0]*FLAP_MAX);
 	_wing_r.update_aero(_v_B, _w_B, altitude, -_u[0]*FLAP_MAX);
@@ -334,7 +338,7 @@ void Sih::generate_fw_aerodynamics()
 	_fuselage.update_aero(_v_B, _w_B, altitude);
 
 	// sum of aerodynamic forces
-	_Fa_I = _C_IB * (_wing_l.get_Fa() + _wing_r.get_Fa() + _tailplane.get_Fa() + _fin.get_Fa() + _fuselage.get_Fa()) - _KDV
+	_Fa_I = _C_SB * (_wing_l.get_Fa() + _wing_r.get_Fa() + _tailplane.get_Fa() + _fin.get_Fa() + _fuselage.get_Fa()) - _KDV
 		* _v_I;
 
 	// aerodynamic moments
@@ -344,7 +348,7 @@ void Sih::generate_fw_aerodynamics()
 void Sih::generate_ts_aerodynamics()
 {
 	// velocity in body frame [m/s]
-	_v_B = _C_IB.transpose() * _v_I;
+	_v_B = Dcmf(_C_ES * _C_SB).transpose() * _v_E;
 
 	// the aerodynamic is resolved in a frame like a standard aircraft (nose-right-belly)
 	Vector3f v_ts = _C_BS.transpose() * _v_B;
@@ -366,68 +370,240 @@ void Sih::generate_ts_aerodynamics()
 		Ma_ts += _ts[i].get_Ma();
 	}
 
-	_Fa_I = _C_IB * _C_BS * Fa_ts - _KDV * _v_I; 	// sum of aerodynamic forces
+	_Fa_I = _C_SB * _C_BS * Fa_ts - _KDV * _v_I; 	// sum of aerodynamic forces
 	_Ma_B = _C_BS * Ma_ts - _KDW * _w_B; 	// aerodynamic moments
+}
+
+Vector3d Sih::gravitationalAcceleration(const Vector3d &position)
+{
+	// Somigliana formula for gravitational acceleration
+	double latitude = atan2(position(2), sqrt(position(0) * position(0) + position(1) * position(1)));
+	double sin_lat = sin(latitude);
+	double g = _ecef.g_e * (1 + 0.001931851353 * sin_lat * sin_lat) / sqrt(1 - _ecef.e2 * sin_lat * sin_lat);
+	return -g * position.normalized();
+}
+
+Vector3d Sih::coriolisAcceleration(const Vector3d &velocity)
+{
+	// return Vector3d(0.0, 0.0, 0.0);
+	Vector3d Omega_e_vec(0, 0, Omega_e);
+	return 2.0 * Omega_e_vec.cross(velocity);
 }
 
 void Sih::equations_of_motion(const float dt)
 {
-	_C_IB = matrix::Dcm<float>(_q); // body to inertial transformation
 
-	// Equations of motion of a rigid body
-	_p_I_dot = _v_I;                        // position differential
-	_v_I_dot = (_W_I + _Fa_I + _C_IB * _T_B) / _MASS;   // conservation of linear momentum
+
+	_C_SB = matrix::Dcm<float>(_q);
+
+	gravity = gravitationalAcceleration(Vector3d(_p_E(0), _p_E(1), _p_E(2)));
+	Vector3d coriolis = coriolisAcceleration(Vector3d(_v_E(0), _v_E(1), _v_E(2)));
+	Vector3d Fa_E = gravity + coriolis;
+	Vector3f Fa_Ef(Fa_E(0), Fa_E(1), Fa_E(2));
+
+	Dcmf C_EB = _C_ES * _C_SB; // ecef to body transformation
+	_p_E_dot = _v_E;
+	_v_E_dot = (Fa_Ef + C_EB * _T_B) / _MASS;
+	_v_I_dot = _C_ES.transpose() * _v_E_dot;
+
+
 	// _q_dot = _q.derivative1(_w_B);              // attitude differential
 	_dq = Quatf::expq(0.5f * dt * _w_B);
 	_w_B_dot = _Im1 * (_Mt_B + _Ma_B - _w_B.cross(_I * _w_B)); // conservation of angular momentum
 
 	// fake ground, avoid free fall
-	if (_p_I(2) > 0.0f && (_v_I_dot(2) > 0.0f || _v_I(2) > 0.0f)) {
+	// if (_p_I(2) > 0.0f && (_v_I_dot(2) > 0.0f || _v_I(2) > 0.0f)) {
+	Vector3d temp_v_E_dot = Vector3d(_v_E_dot(0), _v_E_dot(1), _v_E_dot(2));
+	double vertical_acc = temp_v_E_dot.dot(_p_E) / _p_E.norm();
+
+	if (_alt < 0.0 && vertical_acc <= 0.0) {
 		if (_vehicle == VehicleType::MC || _vehicle == VehicleType::TS) {
 			if (!_grounded) {    // if we just hit the floor
 				// for the accelerometer, compute the acceleration that will stop the vehicle in one time step
 				_v_I_dot = -_v_I / dt;
+				_v_E_dot = -_v_E / dt;
 
 			} else {
 				_v_I_dot.setZero();
+				_v_E_dot.setZero();
 			}
 
 			_v_I.setZero();
+			_v_E.setZero();
 			_w_B.setZero();
 			_grounded = true;
 
-		} else if (_vehicle == VehicleType::FW) {
-			if (!_grounded) {    // if we just hit the floor
-				// for the accelerometer, compute the acceleration that will stop the vehicle in one time step
-				_v_I_dot(2) = -_v_I(2) / dt;
-
-			} else {
-				// we only allow negative acceleration in order to takeoff
-				_v_I_dot(2) = fminf(_v_I_dot(2), 0.0f);
-			}
-
-			// integration: Euler forward
-			_p_I = _p_I + _p_I_dot * dt;
-			_v_I = _v_I + _v_I_dot * dt;
-			Eulerf RPY = Eulerf(_q);
-			RPY(0) = 0.0f;	// no roll
-			RPY(1) = radians(0.0f); // pitch slightly up if needed to get some lift
-			_q = Quatf(RPY);
-			_w_B.setZero();
-			_grounded = true;
 		}
 
-	} else {
+	} else if (_vehicle == VehicleType::FW) {
+		if (!_grounded) {    // if we just hit the floor
+			// for the accelerometer, compute the acceleration that will stop the vehicle in one time step
+			_v_I_dot(2) = -_v_I(2) / dt;
+
+		} else {
+			// we only allow negative acceleration in order to takeoff
+			_v_I_dot(2) = fminf(_v_I_dot(2), 0.0f);
+		}
+
 		// integration: Euler forward
-		_p_I = _p_I + _p_I_dot * dt;
-		_v_I = _v_I + _v_I_dot * dt;
-		_q = _q * _dq;
-		_q.normalize();
+		Vector3d temp_p_E_dot = Vector3d(_v_E(0), _v_E(1), _v_E(2));
+		_p_E = _p_E + temp_p_E_dot * dt;
+		_v_E = _v_E + _v_E_dot * dt;
+
+		Eulerf RPY = Eulerf(_q);
+		RPY(0) = 0.0f;	// no roll
+		RPY(1) = radians(0.0f); // pitch slightly up if needed to get some lift
+		_q = Quatf(RPY);
+		_w_B.setZero();
+		_grounded = true;
+		// }
+
+	} else {
+
+		// integration: Euler forward
+		Vector3d temp_p_E_dot = Vector3d(_v_E(0), _v_E(1), _v_E(2));
+		_p_E = _p_E + temp_p_E_dot * dt;
+		_v_E = _v_E + _v_E_dot * dt;
+
+		printf("v_E: %f %f %f\n", (double)_v_E(0), (double)_v_E(1), (double)_v_E(2));
+
+		_q_E = _q_E  * _dq;
+
+
+		_q_E.normalize();
 		// integration Runge-Kutta 4
 		// rk4_update(_p_I, _v_I, _q, _w_B);
 		_w_B = constrain(_w_B + _w_B_dot * dt, -6.0f * M_PI_F, 6.0f * M_PI_F);
 		_grounded = false;
+
 	}
+
+	// convert ecef p_E to lla
+	// ecefToLLA(_p_E, _lat, _lon, _alt);
+
+	printf("p_E: %f %f %f\n", _p_E(0), _p_E(1), _p_E(2));
+
+	convert(_lat, _lon, _alt);
+
+	if (abs(_LAT0 - 7.0) < 1e-3) {
+		_LAT0 = _lat;
+		_LON0 = _lon;
+		_H0 = _alt;
+	}
+
+
+	// lla to local:
+	project(_lat, _lon, _p_I(0), _p_I(1));
+
+
+
+}
+
+// void convert(const Vector3d &_p_E, const Vector3d &v_eb_e, const Matrix3d &C_b_e)
+void Sih::convert(double &latitude, double &longitude, double &height)
+{
+
+	double R_0 = 6378137; // WGS84 Equatorial radius in meters
+	double e = 0.0818191908425; // WGS84 eccentricity
+
+	// Compute longitude (lambda_b)
+	longitude = atan2(_p_E(1), _p_E(0));
+
+	// Compute auxiliary quantities
+	double k1 = sqrt(1 - e * e) * std::abs(_p_E(2));
+	double k2 = e * e * R_0;
+	double beta = sqrt(_p_E(0) * _p_E(0) + _p_E(1) * _p_E(1));
+	double E = (k1 - k2) / beta;
+	double F = (k1 + k2) / beta;
+
+	// Compute P, Q, D, V, G, T
+	double P = 4.0 / 3.0 * (E * F + 1);
+	double Q = 2 * (E * E - F * F);
+	double D = P * P * P + Q * Q;
+	double V = pow(sqrt(D) - Q, 1.0 / 3.0) - pow(sqrt(D) + Q, 1.0 / 3.0);
+	double G = 0.5 * (sqrt(E * E + V) + E);
+	double T = sqrt(G * G + (F - V * G) / (2 * G - E)) - G;
+
+	// Compute latitude (L_b)
+	latitude = copysign(1.0, _p_E(2)) * atan((1 - T * T) / (2 * T * sqrt(1 - e * e)));
+
+	// Compute height (h_b)
+	height = (beta - R_0 * T) * cos(latitude) +
+		 (_p_E(2) - copysign(1.0, _p_E(2)) * R_0 * sqrt(1 - e * e)) * sin(latitude);
+
+	// Calculate the ECEF to NED coordinate transformation matrix (C_e_n)
+	double cos_lat = cos(latitude);
+	double sin_lat = sin(latitude);
+	double cos_long = cos(longitude);
+	double sin_long = sin(longitude);
+
+	float val[] = {(float)(sin_lat * cos_long), (float)(-sin_lat * sin_long), (float)cos_lat,
+		       (float) - sin_long, (float)cos_long,           0.f,
+		       (float)(-cos_lat * cos_long), (float)(-cos_lat * sin_long), (float) - sin_lat
+		      };
+
+	_C_ES = Dcmf(val).transpose();
+
+	// Transform velocity to NED frame
+	_v_S = _C_ES.transpose() * _v_E;
+	// _C_SB = _C_ES.transpose() * _C_EB;
+
+	// printf("Latitude: %f, Longitude: %f, Height: %f\n", latitude, longitude, height);
+
+	// return std::make_tuple(latitude, longitude, height, v_eb_n, C_b_n);
+}
+
+
+void Sih::ecefToLLA(Vector3d &p_E, double &latitude, double &longitude, double &altitude)
+{
+	double x = p_E(0);
+	double y = p_E(1);
+	double z = p_E(2);
+	longitude = atan2(y, x);
+
+	double p = sqrt(x * x + y * y);
+	double theta = atan2(z * _ecef.a, p * (1 - _ecef.e2));
+
+	latitude = atan2(z + _ecef.e2 * _ecef.a * pow(sin(theta), 3), p - _ecef.e2 * _ecef.a * pow(cos(theta), 3));
+
+	double N = _ecef.a / sqrt(1 - _ecef.e2 * pow(sin(latitude), 2));
+	altitude = p / cos(latitude) - N;
+
+	const double tolerance = 1e-9;
+	double prev_latitude = -1.0;
+
+	while (fabs(latitude - prev_latitude) > tolerance) {
+		prev_latitude = latitude;
+		N = _ecef.a / sqrt(1 - _ecef.e2 * pow(sin(latitude), 2));
+		altitude = p / cos(latitude) - N;
+		latitude = atan2(z + _ecef.e2 * N * sin(latitude), p);
+	}
+}
+
+void Sih::project(double lat, double lon, float &x, float &y) const
+{
+	const double lat_rad = math::radians(lat);
+	const double lon_rad = math::radians(lon);
+
+	const double sin_lat = sin(lat_rad);
+	const double cos_lat = cos(lat_rad);
+
+	const double cos_d_lon = cos(lon_rad - _LON0);
+
+	const double _ref_sin_lat = sin(_LAT0);
+	const double _ref_cos_lat = cos(_LAT0);
+
+	const double arg = math::constrain(_ref_sin_lat * sin_lat + _ref_cos_lat * cos_lat * cos_d_lon, -1.0,  1.0);
+	const double c = acos(arg);
+
+	double k = 1.0;
+
+	if (fabs(c) > 0) {
+		k = (c / sin(c));
+	}
+
+	x = static_cast<float>(k * (_ref_cos_lat * sin_lat - _ref_sin_lat * cos_lat * cos_d_lon) * CONSTANTS_RADIUS_OF_EARTH);
+	y = static_cast<float>(k * cos_lat * sin(lon_rad - _LON0) * CONSTANTS_RADIUS_OF_EARTH);
 }
 
 void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
@@ -437,7 +613,11 @@ void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
 	//     In 2018 IEEE International Conference on Robotics and Automation (ICRA), pp. 6573-6580. IEEE, 2018.
 
 	// IMU
-	Vector3f acc = _C_IB.transpose() * (_v_I_dot - Vector3f(0.0f, 0.0f, CONSTANTS_ONE_G)) + noiseGauss3f(0.5f, 1.7f, 1.4f);
+	// Vector3f acc = _C_SB.transpose() * (_v_I_dot - Vector3f(0.0f, 0.0f, CONSTANTS_ONE_G)) + noiseGauss3f(0.5f, 1.7f, 1.4f);
+	// Vector3f gyro = _w_B + noiseGauss3f(0.14f, 0.07f, 0.03f);
+
+	Vector3f vedot = _v_E_dot - Vector3f(gravity(0), gravity(1), gravity(2));
+	Vector3f acc = (_C_ES * _C_SB).transpose() * vedot + noiseGauss3f(0.5f, 1.7f, 1.4f);
 	Vector3f gyro = _w_B + noiseGauss3f(0.14f, 0.07f, 0.03f);
 
 	// update IMU every iteration
@@ -480,7 +660,7 @@ void Sih::send_dist_snsr(const hrt_abstime &time_now_us)
 		distance_sensor.current_distance = _distance_snsr_override;
 
 	} else {
-		distance_sensor.current_distance = -_p_I(2) / _C_IB(2, 2);
+		distance_sensor.current_distance = -_p_I(2) / _C_SB(2, 2);
 
 		if (distance_sensor.current_distance > _distance_snsr_max) {
 			// this is based on lightware lw20 behaviour
@@ -513,6 +693,8 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 		_q.copyTo(attitude.q);
 		attitude.timestamp = hrt_absolute_time();
 		_attitude_ground_truth_pub.publish(attitude);
+
+
 	}
 
 	{
@@ -527,11 +709,19 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 
 		local_position.x = _p_I(0);
 		local_position.y = _p_I(1);
-		local_position.z = _p_I(2);
+		// local_position.z = _p_I(2);
+		local_position.z = -_alt;
 
-		local_position.vx = _v_I(0);
-		local_position.vy = _v_I(1);
-		local_position.vz = _v_I(2);
+		// printf("local x: %f, y: %f, z: %f\n", (double)local_position.x, (double)local_position.y, (double)local_position.z);
+
+		local_position.vx = _v_S(0);
+		local_position.vy = _v_S(1);
+		local_position.vz = _v_S(2);
+
+		// local_position.vx = _v_I(0);
+		// local_position.vy = _v_I(1);
+		// local_position.vz = _v_I(2);
+
 		local_position.z_deriv = _v_I(2);
 
 		local_position.ax = _v_I_dot(0);
@@ -551,19 +741,70 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 
 		local_position.timestamp = hrt_absolute_time();
 		_local_position_ground_truth_pub.publish(local_position);
+
+		// printf("lpos x: %f, y: %f, z: %f\n", (double)local_position.x, (double)local_position.y, (double)local_position.z);
+
+
+		// printf("timestamp_sample %lld\n", local_position.timestamp_sample);
+		// printf("xy_valid %d\n", local_position.xy_valid);
+		// printf("z_valid %d\n", local_position.z_valid);
+		// printf("v_xy_valid %d\n", local_position.v_xy_valid);
+		// printf("v_z_valid %d\n", local_position.v_z_valid);
+		// printf("x %f\n", (double)local_position.x);
+		// printf("y %f\n", (double)local_position.y);
+		// printf("z %f\n", (double)local_position.z);
+		// printf("vx %f\n", (double)local_position.vx);
+		// printf("vy %f\n", (double)local_position.vy);
+		// printf("vz %f\n", (double)local_position.vz);
+		// printf("z_deriv %f\n", (double)local_position.z_deriv);
+		// printf("ax %f\n", (double)local_position.ax);
+		// printf("ay %f\n", (double)local_position.ay);
+		// printf("az %f\n", (double)local_position.az);
+		// printf("xy_global %d\n", local_position.xy_global);
+		// printf("z_global %d\n", local_position.z_global);
+		// printf("ref_timestamp %lld\n", local_position.ref_timestamp);
+		// printf("ref_lat %f\n", (double)local_position.ref_lat);
+		// printf("ref_lon %f\n", (double)local_position.ref_lon);
+		// printf("ref_alt %f\n", (double)local_position.ref_alt);
+		// printf("heading %f\n", (double)local_position.heading);
+		// printf("heading_good_for_control %d\n", local_position.heading_good_for_control);
+		// printf("unaided_heading %f\n", (double)local_position.unaided_heading);
+		// printf("timestamp %lld\n", local_position.timestamp);
+
+
+
+
+
 	}
 
 	{
 		// publish global position groundtruth
 		vehicle_global_position_s global_position{};
 		global_position.timestamp_sample = time_now_us;
-		global_position.lat = _LAT0 + degrees((double)_p_I(0) / CONSTANTS_RADIUS_OF_EARTH);;
-		global_position.lon = _LON0 + degrees((double)_p_I(1) / CONSTANTS_RADIUS_OF_EARTH) / _COS_LAT0;;
-		global_position.alt = _H0 - _p_I(2);;
+		global_position.lat = _lat;
+		global_position.lon = _lon;
+		// global_position.alt = _H0 - _p_I(2);;
+		global_position.alt = -_alt;
 		global_position.alt_ellipsoid = global_position.alt;
 		global_position.terrain_alt = -_p_I(2);
 		global_position.timestamp = hrt_absolute_time();
 		_global_position_ground_truth_pub.publish(global_position);
+
+		// printf("lat: %f, lon: %f, alt: %f\n", (double)global_position.lat, (double)global_position.lon, (double)global_position.alt);
+
+		// printf("timestamp_sample %lld\n", global_position.timestamp_sample);
+		// printf("lat %f\n", global_position.lat);
+		// printf("lon %f\n", global_position.lon);
+		// printf("alt %f\n", (double)global_position.alt);
+		// printf("alt_ellipsoid %f\n", (double)global_position.alt_ellipsoid);
+		// printf("terrain_alt %f\n", (double)global_position.terrain_alt);
+		// printf("timestamp %lld\n", global_position.timestamp);
+
+
+		// printf("H0 %f\n", (double)_H0);
+		// printf("p_I(2) %f\n", (double)_p_I(2));
+
+
 	}
 }
 

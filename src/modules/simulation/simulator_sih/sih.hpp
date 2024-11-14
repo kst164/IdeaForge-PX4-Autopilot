@@ -162,6 +162,40 @@ private:
 	void generate_fw_aerodynamics();
 	void generate_ts_aerodynamics();
 	void sensor_step();
+	void ecefToLLA(matrix::Vector3d &p_E, double &latitude, double &longitude, double &altitude);
+	matrix::Vector3d gravitationalAcceleration(const matrix::Vector3d &position);
+	matrix::Vector3d coriolisAcceleration(const matrix::Vector3d &velocity);
+	matrix::Vector3d centrifugalAcceleration(const matrix::Vector3d &position);
+
+	void project(double lat, double lon, float &x, float &y) const;
+	void rotationToSurfaceFrame();
+	void convert(double &latitude, double &longitude, double &height);
+
+	struct EcefConst {
+		const double a = 6378137.0;                // Semi-major axis (equatorial radius) in meters
+		// const double b = 6356752.3142;             // Semi-minor axis (polar radius) in meters
+		const double f = 1 / 298.257223563;        // Flattening
+		const double e2 = 2 * f - f * f;           // Square of eccentricity
+		const double g_e = 9.7803253359;           // Gravity at the equator (m/s^2)
+		const double g_p = 9.8321849378;
+	};
+
+	EcefConst _ecef;
+
+	matrix::Vector3d _p_E;
+	matrix::Vector3f _v_E;
+	matrix::Vector3f _p_E_dot;
+	matrix::Vector3f _v_E_dot;
+	double _lat;
+	double _lon;
+	double _alt;
+	matrix::Dcmf _C_ES;
+	matrix::Dcmf _C_EB;
+	matrix::Vector3f _v_S;
+
+	const double Omega_e = 7.2921159e-5;      // Earth's angular velocity (rad/s)
+
+
 
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
 	void lockstep_loop();
@@ -194,11 +228,14 @@ private:
 	matrix::Vector3f    _p_I_dot{};       // inertial position differential
 	matrix::Vector3f    _v_I_dot{};       // inertial velocity differential
 	matrix::Quatf       _q{};             // quaternion attitude
-	matrix::Dcmf        _C_IB{};          // body to inertial transformation
+	matrix::Quatf       _q_E{};             // quaternion attitude
+	matrix::Dcmf        _C_SB{};          // body to inertial transformation
 	matrix::Vector3f    _w_B{};           // body rates in body frame [rad/s]
 	matrix::Quatf       _dq{};            // quaternion differential
 	matrix::Vector3f    _w_B_dot{};       // body rates differential
 	float       _u[NB_MOTORS] {};         // thruster signals
+
+	matrix::Vector3d gravity{};
 
 	enum class VehicleType {MC, FW, TS};
 	VehicleType _vehicle = VehicleType::MC;

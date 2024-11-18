@@ -271,12 +271,12 @@ void Sih::init_variables()
 {
 	srand(1234);    // initialize the random seed once before calling generate_wgn()
 
-	_p_I = Vector3f(0.0f, 0.0f, 0.0f);
+	_lpos = Vector3f(0.0f, 0.0f, 0.0f);
 	_v_I = Vector3f(0.0f, 0.0f, 0.0f);
 	_p_E = Vector3d(_ecef.a, 0.0, 0.0);
 	_v_E = Vector3f(0.0f, 0.0f, 0.0f);
 	_q = Quatf(1.0f, 0.0f, 0.0f, 0.0f);
-	_q_E = Quatf(0.7071068, 0.0f, -0.7071068, 0.0f);
+	_q_E = Quatf(Eulerf(0.f, -M_PI_2_F, 0.f));
 	_w_B = Vector3f(0.0f, 0.0f, 0.0f);
 
 	_u[0] = _u[1] = _u[2] = _u[3] = 0.0f;
@@ -330,7 +330,7 @@ void Sih::generate_force_and_torques()
 void Sih::generate_fw_aerodynamics()
 {
 	_v_B = Dcmf(_C_ES * _C_SB).transpose() * _v_E;	// velocity in body frame [m/s]
-	float altitude = _H0 - _p_I(2);
+	float altitude = _H0 - _lpos(2);
 	_wing_l.update_aero(_v_B, _w_B, altitude, _u[0]*FLAP_MAX);
 	_wing_r.update_aero(_v_B, _w_B, altitude, -_u[0]*FLAP_MAX);
 	_tailplane.update_aero(_v_B, _w_B, altitude, _u[1]*FLAP_MAX, _T_MAX * _u[3]);
@@ -353,7 +353,7 @@ void Sih::generate_ts_aerodynamics()
 	// the aerodynamic is resolved in a frame like a standard aircraft (nose-right-belly)
 	Vector3f v_ts = _C_BS.transpose() * _v_B;
 	Vector3f w_ts = _C_BS.transpose() * _w_B;
-	float altitude = _H0 - _p_I(2);
+	float altitude = _H0 - _lpos(2);
 
 	Vector3f Fa_ts{};
 	Vector3f Ma_ts{};
@@ -392,18 +392,14 @@ Vector3d Sih::coriolisAcceleration(const Vector3d &velocity)
 
 void Sih::equations_of_motion(const float dt)
 {
-
-
 	_C_SB = matrix::Dcm<float>(_q);
 
-	gravity = gravitationalAcceleration(Vector3d(_p_E(0), _p_E(1), _p_E(2)));
+	gravity = gravitationalAcceleration(_p_E);
 	Vector3d coriolis = coriolisAcceleration(Vector3d(_v_E(0), _v_E(1), _v_E(2)));
 	Vector3d Fa_E = gravity + coriolis;
 	Vector3f Fa_Ef(Fa_E(0), Fa_E(1), Fa_E(2));
 
-	Dcmf C_EB = _C_ES * _C_SB; // ecef to body transformation
-	_p_E_dot = _v_E;
-	_v_E_dot = (Fa_Ef + C_EB * _T_B) / _MASS;
+	_v_E_dot = Fa_Ef + (_q_E.rotateVector(_T_B)) / _MASS;
 	_v_I_dot = _C_ES.transpose() * _v_E_dot;
 
 
@@ -478,12 +474,8 @@ void Sih::equations_of_motion(const float dt)
 
 	}
 
-	// convert ecef p_E to lla
-	// ecefToLLA(_p_E, _lat, _lon, _alt);
-
-	printf("p_E: %f %f %f\n", _p_E(0), _p_E(1), _p_E(2));
-
-	convert(_lat, _lon, _alt);
+	ecefToNed();
+	// printf("lat: %f, lon: %f, alt: %f\n", _lat, _lon, (double)_alt);
 
 	if (abs(_LAT0 - 7.0) < 1e-3) {
 		_LAT0 = _lat;
@@ -491,23 +483,18 @@ void Sih::equations_of_motion(const float dt)
 		_H0 = _alt;
 	}
 
-
 	// lla to local:
-	project(_lat, _lon, _p_I(0), _p_I(1));
-
-
-
+	project(_lat, _lon, _lpos(0), _lpos(1));
 }
 
-// void convert(const Vector3d &_p_E, const Vector3d &v_eb_e, const Matrix3d &C_b_e)
-void Sih::convert(double &latitude, double &longitude, double &height)
+void Sih::ecefToNed()
 {
-
+	// Convert position using Borkowski closed-form exact solution
 	double R_0 = 6378137; // WGS84 Equatorial radius in meters
 	double e = 0.0818191908425; // WGS84 eccentricity
 
 	// Compute longitude (lambda_b)
-	longitude = atan2(_p_E(1), _p_E(0));
+	_lon = atan2(_p_E(1), _p_E(0));
 
 	// Compute auxiliary quantities
 	double k1 = sqrt(1 - e * e) * std::abs(_p_E(2));
@@ -516,7 +503,6 @@ void Sih::convert(double &latitude, double &longitude, double &height)
 	double E = (k1 - k2) / beta;
 	double F = (k1 + k2) / beta;
 
-	// Compute P, Q, D, V, G, T
 	double P = 4.0 / 3.0 * (E * F + 1);
 	double Q = 2 * (E * E - F * F);
 	double D = P * P * P + Q * Q;
@@ -525,59 +511,29 @@ void Sih::convert(double &latitude, double &longitude, double &height)
 	double T = sqrt(G * G + (F - V * G) / (2 * G - E)) - G;
 
 	// Compute latitude (L_b)
-	latitude = copysign(1.0, _p_E(2)) * atan((1 - T * T) / (2 * T * sqrt(1 - e * e)));
+	_lat = copysign(1.0, _p_E(2)) * atan((1 - T * T) / (2 * T * sqrt(1 - e * e)));
 
 	// Compute height (h_b)
-	height = (beta - R_0 * T) * cos(latitude) +
-		 (_p_E(2) - copysign(1.0, _p_E(2)) * R_0 * sqrt(1 - e * e)) * sin(latitude);
+	_alt = (beta - R_0 * T) * cos(_lat) +
+	       (_p_E(2) - copysign(1.0, _p_E(2)) * R_0 * sqrt(1 - e * e)) * sin(_lat);
 
 	// Calculate the ECEF to NED coordinate transformation matrix (C_e_n)
-	double cos_lat = cos(latitude);
-	double sin_lat = sin(latitude);
-	double cos_long = cos(longitude);
-	double sin_long = sin(longitude);
+	double cos_lat = cos(_lat);
+	double sin_lat = sin(_lat);
+	double cos_long = cos(_lon);
+	double sin_long = sin(_lon);
 
 	float val[] = {(float)(sin_lat * cos_long), (float)(-sin_lat * sin_long), (float)cos_lat,
 		       (float) - sin_long, (float)cos_long,           0.f,
 		       (float)(-cos_lat * cos_long), (float)(-cos_lat * sin_long), (float) - sin_lat
 		      };
 
-	_C_ES = Dcmf(val).transpose();
+	const Dcmf C_SE(val);
+	_C_ES = C_SE.transpose();
 
 	// Transform velocity to NED frame
-	_v_S = _C_ES.transpose() * _v_E;
-	// _C_SB = _C_ES.transpose() * _C_EB;
-
-	// printf("Latitude: %f, Longitude: %f, Height: %f\n", latitude, longitude, height);
-
-	// return std::make_tuple(latitude, longitude, height, v_eb_n, C_b_n);
-}
-
-
-void Sih::ecefToLLA(Vector3d &p_E, double &latitude, double &longitude, double &altitude)
-{
-	double x = p_E(0);
-	double y = p_E(1);
-	double z = p_E(2);
-	longitude = atan2(y, x);
-
-	double p = sqrt(x * x + y * y);
-	double theta = atan2(z * _ecef.a, p * (1 - _ecef.e2));
-
-	latitude = atan2(z + _ecef.e2 * _ecef.a * pow(sin(theta), 3), p - _ecef.e2 * _ecef.a * pow(cos(theta), 3));
-
-	double N = _ecef.a / sqrt(1 - _ecef.e2 * pow(sin(latitude), 2));
-	altitude = p / cos(latitude) - N;
-
-	const double tolerance = 1e-9;
-	double prev_latitude = -1.0;
-
-	while (fabs(latitude - prev_latitude) > tolerance) {
-		prev_latitude = latitude;
-		N = _ecef.a / sqrt(1 - _ecef.e2 * pow(sin(latitude), 2));
-		altitude = p / cos(latitude) - N;
-		latitude = atan2(z + _ecef.e2 * N * sin(latitude), p);
-	}
+	_v_S = C_SE * _v_E;
+	_q = Quatf(_C_ES) * _q_E;
 }
 
 void Sih::project(double lat, double lon, float &x, float &y) const
@@ -617,7 +573,7 @@ void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
 	// Vector3f gyro = _w_B + noiseGauss3f(0.14f, 0.07f, 0.03f);
 
 	Vector3f vedot = _v_E_dot - Vector3f(gravity(0), gravity(1), gravity(2));
-	Vector3f acc = (_C_ES * _C_SB).transpose() * vedot + noiseGauss3f(0.5f, 1.7f, 1.4f);
+	Vector3f acc = _q_E.rotateVectorInverse(vedot) + noiseGauss3f(0.5f, 1.7f, 1.4f);
 	Vector3f gyro = _w_B + noiseGauss3f(0.14f, 0.07f, 0.03f);
 
 	// update IMU every iteration
@@ -660,7 +616,7 @@ void Sih::send_dist_snsr(const hrt_abstime &time_now_us)
 		distance_sensor.current_distance = _distance_snsr_override;
 
 	} else {
-		distance_sensor.current_distance = -_p_I(2) / _C_SB(2, 2);
+		distance_sensor.current_distance = -_lpos(2) / _C_SB(2, 2);
 
 		if (distance_sensor.current_distance > _distance_snsr_max) {
 			// this is based on lightware lw20 behaviour
@@ -707,8 +663,8 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 		local_position.v_xy_valid = true;
 		local_position.v_z_valid = true;
 
-		local_position.x = _p_I(0);
-		local_position.y = _p_I(1);
+		local_position.x = _lpos(0);
+		local_position.y = _lpos(1);
 		// local_position.z = _p_I(2);
 		local_position.z = -_alt;
 
@@ -784,9 +740,9 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 		global_position.lat = _lat;
 		global_position.lon = _lon;
 		// global_position.alt = _H0 - _p_I(2);;
-		global_position.alt = -_alt;
+		global_position.alt = _alt;
 		global_position.alt_ellipsoid = global_position.alt;
-		global_position.terrain_alt = -_p_I(2);
+		global_position.terrain_alt = -_lpos(2);
 		global_position.timestamp = hrt_absolute_time();
 		_global_position_ground_truth_pub.publish(global_position);
 
@@ -864,7 +820,7 @@ int Sih::print_status()
 
 	PX4_INFO("vehicle landed: %d", _grounded);
 	PX4_INFO("inertial position NED (m)");
-	_p_I.print();
+	_lpos.print();
 	PX4_INFO("inertial velocity NED (m/s)");
 	_v_I.print();
 	PX4_INFO("attitude roll-pitch-yaw (deg)");

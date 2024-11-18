@@ -162,14 +162,13 @@ private:
 	void generate_fw_aerodynamics();
 	void generate_ts_aerodynamics();
 	void sensor_step();
-	void ecefToLLA(matrix::Vector3d &p_E, double &latitude, double &longitude, double &altitude);
 	matrix::Vector3d gravitationalAcceleration(const matrix::Vector3d &position);
 	matrix::Vector3d coriolisAcceleration(const matrix::Vector3d &velocity);
 	matrix::Vector3d centrifugalAcceleration(const matrix::Vector3d &position);
 
 	void project(double lat, double lon, float &x, float &y) const;
 	void rotationToSurfaceFrame();
-	void convert(double &latitude, double &longitude, double &height);
+	void ecefToNed();
 
 	struct EcefConst {
 		const double a = 6378137.0;                // Semi-major axis (equatorial radius) in meters
@@ -184,13 +183,11 @@ private:
 
 	matrix::Vector3d _p_E;
 	matrix::Vector3f _v_E;
-	matrix::Vector3f _p_E_dot;
 	matrix::Vector3f _v_E_dot;
 	double _lat;
 	double _lon;
 	double _alt;
 	matrix::Dcmf _C_ES;
-	matrix::Dcmf _C_EB;
 	matrix::Vector3f _v_S;
 
 	const double Omega_e = 7.2921159e-5;      // Earth's angular velocity (rad/s)
@@ -222,7 +219,7 @@ private:
 	matrix::Vector3f    _Fa_I{};          // aerodynamic force in inertial frame [N]
 	matrix::Vector3f    _Mt_B{};          // thruster moments in the body frame [Nm]
 	matrix::Vector3f    _Ma_B{};          // aerodynamic moments in the body frame [Nm]
-	matrix::Vector3f    _p_I{};           // inertial position [m]
+	matrix::Vector3f    _lpos{};          // position in a local tangent-plane frame [m]
 	matrix::Vector3f    _v_I{};           // inertial velocity [m/s]
 	matrix::Vector3f    _v_B{};           // body frame velocity [m/s]
 	matrix::Vector3f    _p_I_dot{};       // inertial position differential

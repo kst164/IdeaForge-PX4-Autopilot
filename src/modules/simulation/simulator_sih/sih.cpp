@@ -480,6 +480,7 @@ void Sih::equations_of_motion(const float dt)
 
 	// lla to local:
 	project(_lat, _lon, _lpos(0), _lpos(1));
+	_lpos(2) = -(static_cast<float>(_alt) - _H0);
 }
 
 void Sih::ecefToNed()
@@ -677,7 +678,7 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 
 		local_position.x = _lpos(0);
 		local_position.y = _lpos(1);
-		local_position.z = -(static_cast<float>(_alt) - _H0);
+		local_position.z = _lpos(2);
 
 		local_position.vx = _v_S(0);
 		local_position.vy = _v_S(1);

@@ -162,13 +162,15 @@ private:
 	void generate_fw_aerodynamics();
 	void generate_ts_aerodynamics();
 	void sensor_step();
-	matrix::Vector3d gravitationalAcceleration(const matrix::Vector3d &position);
-	matrix::Vector3d coriolisAcceleration(const matrix::Vector3d &velocity);
+	float computeGravity(double lat);
+	matrix::Vector3f coriolisAcceleration(const matrix::Vector3f &velocity);
 	matrix::Vector3d centrifugalAcceleration(const matrix::Vector3d &position);
 
 	void project(double lat, double lon, float &x, float &y) const;
 	void rotationToSurfaceFrame();
 	void ecefToNed();
+	matrix::Vector3d llaToEcef(double lat, double lon, double alt);
+	matrix::Dcmf computeRotEcefToNed(const double lat, const double lon, const double alt);
 
 	struct EcefConst {
 		const double a = 6378137.0;                // Semi-major axis (equatorial radius) in meters
@@ -190,7 +192,7 @@ private:
 	matrix::Dcmf _C_ES;
 	matrix::Vector3f _v_S;
 
-	const double Omega_e = 7.2921159e-5;      // Earth's angular velocity (rad/s)
+	const float Omega_e = 7.2921159e-5;      // Earth's angular velocity (rad/s)
 
 
 
@@ -232,7 +234,7 @@ private:
 	matrix::Vector3f    _w_B_dot{};       // body rates differential
 	float       _u[NB_MOTORS] {};         // thruster signals
 
-	matrix::Vector3d gravity{};
+	matrix::Vector3f gravity{};
 
 	enum class VehicleType {MC, FW, TS};
 	VehicleType _vehicle = VehicleType::MC;
@@ -283,7 +285,7 @@ private:
 
 	// parameters
 	float _MASS, _T_MAX, _Q_MAX, _L_ROLL, _L_PITCH, _KDV, _KDW, _H0, _T_TAU;
-	double _LAT0, _LON0, _COS_LAT0;
+	double _LAT0, _LON0;
 	matrix::Vector3f _W_I;  // weight of the vehicle in inertial frame [N]
 	matrix::Matrix3f _I;    // vehicle inertia matrix
 	matrix::Matrix3f _Im1;  // inverse of the inertia matrix

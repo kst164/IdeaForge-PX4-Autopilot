@@ -68,8 +68,8 @@ void Sih::run()
 	_px4_accel.set_temperature(T1_C);
 	_px4_gyro.set_temperature(T1_C);
 
-	parameters_updated();
 	init_variables();
+	parameters_updated();
 
 	const hrt_abstime task_start = hrt_absolute_time();
 	_last_run = task_start;
@@ -241,12 +241,27 @@ void Sih::parameters_updated()
 	_L_PITCH = _sih_l_pitch.get();
 	_KDV = _sih_kdv.get();
 	_KDW = _sih_kdw.get();
-	_H0 = _sih_h0.get();
 
-	// _LAT0 = (double)_sih_lat0.get();
-	// _LON0 = (double)_sih_lon0.get();
-	_LAT0 = 7.0;
-	_COS_LAT0 = cosl((long double)radians(_LAT0));
+	if ((fabsf(static_cast<float>(_LAT0) - radians(_sih_lat0.get())) > FLT_EPSILON)
+	    || (fabsf(static_cast<float>(_LON0) - radians(_sih_lon0.get())) > FLT_EPSILON)
+	    || (fabsf(_H0 - _sih_h0.get()) > FLT_EPSILON)) {
+		_LAT0 = (double)radians(_sih_lat0.get());
+		_LON0 = (double)radians(_sih_lon0.get());
+		_H0 = _sih_h0.get();
+
+		// Reset earth position, velocity and attitude
+		_lat = _LAT0;
+		_lon = _LON0;
+		_alt = static_cast<double>(_H0);
+		_p_E = llaToEcef(_lat, _lon, _alt);
+
+		const Dcmf C_SE = computeRotEcefToNed(_lat, _lon, _alt);
+		_C_ES = C_SE.transpose();
+		_v_E = _C_ES * _v_S;
+
+		_q_E = Quatf(_C_ES) * _q;
+		_q_E.normalize();
+	}
 
 	_MASS = _sih_mass.get();
 
@@ -374,45 +389,37 @@ void Sih::generate_ts_aerodynamics()
 	_Ma_B = _C_BS * Ma_ts - _KDW * _w_B; 	// aerodynamic moments
 }
 
-Vector3d Sih::gravitationalAcceleration(const Vector3d &position)
+float Sih::computeGravity(const double lat)
 {
 	// Somigliana formula for gravitational acceleration
-	double latitude = atan2(position(2), sqrt(position(0) * position(0) + position(1) * position(1)));
-	double sin_lat = sin(latitude);
+	double sin_lat = sin(lat);
 	double g = _ecef.g_e * (1 + 0.001931851353 * sin_lat * sin_lat) / sqrt(1 - _ecef.e2 * sin_lat * sin_lat);
-	return -g * position.normalized();
+	return static_cast<float>(g);
 }
 
-Vector3d Sih::coriolisAcceleration(const Vector3d &velocity)
+Vector3f Sih::coriolisAcceleration(const Vector3f &velocity)
 {
-	// return Vector3d(0.0, 0.0, 0.0);
-	Vector3d Omega_e_vec(0, 0, Omega_e);
-	return 2.0 * Omega_e_vec.cross(velocity);
+	Vector3f Omega_e_vec(0.f, 0.f, Omega_e);
+	return 2.f * Omega_e_vec.cross(velocity);
 }
 
 void Sih::equations_of_motion(const float dt)
 {
 	_C_SB = matrix::Dcm<float>(_q);
 
-	gravity = gravitationalAcceleration(_p_E);
-	Vector3d coriolis = coriolisAcceleration(Vector3d(_v_E(0), _v_E(1), _v_E(2)));
-	Vector3d Fa_E = gravity + coriolis;
-	Vector3f Fa_Ef(Fa_E(0), Fa_E(1), Fa_E(2));
+	const float gravity_norm = computeGravity(_lat);
+	gravity = Vector3f(_C_ES.col(2)) * gravity_norm;
+	Vector3f coriolis = coriolisAcceleration(_v_E);
+	Vector3f Fa_E = gravity + coriolis;
 
-	_v_E_dot = Fa_Ef + (_q_E.rotateVector(_T_B)) / _MASS;
+	_v_E_dot = Fa_E + (_q_E.rotateVector(_T_B)) / _MASS;
 	_v_I_dot = _C_ES.transpose() * _v_E_dot;
 
 
-	// _q_dot = _q.derivative1(_w_B);              // attitude differential
-	_dq = Quatf::expq(0.5f * dt * _w_B);
-	_w_B_dot = _Im1 * (_Mt_B + _Ma_B - _w_B.cross(_I * _w_B)); // conservation of angular momentum
-
 	// fake ground, avoid free fall
-	// if (_p_I(2) > 0.0f && (_v_I_dot(2) > 0.0f || _v_I(2) > 0.0f)) {
-	Vector3d temp_v_E_dot = Vector3d(_v_E_dot(0), _v_E_dot(1), _v_E_dot(2));
-	double vertical_acc = temp_v_E_dot.dot(_p_E) / _p_E.norm();
+	double vertical_acc = Vector3d(_v_E_dot(0), _v_E_dot(1), _v_E_dot(2)).dot(_p_E) / _p_E.norm();
 
-	if (_alt < 0.0 && vertical_acc <= 0.0) {
+	if ((static_cast<float>(_alt) - _H0) < 0.f && (vertical_acc <= 0.0 || _v_I(2) > 0.f)) {
 		if (_vehicle == VehicleType::MC || _vehicle == VehicleType::TS) {
 			if (!_grounded) {    // if we just hit the floor
 				// for the accelerometer, compute the acceleration that will stop the vehicle in one time step
@@ -429,57 +436,47 @@ void Sih::equations_of_motion(const float dt)
 			_w_B.setZero();
 			_grounded = true;
 
+		} else if (_vehicle == VehicleType::FW) {
+			if (!_grounded) {    // if we just hit the floor
+				// for the accelerometer, compute the acceleration that will stop the vehicle in one time step
+				_v_I_dot(2) = -_v_I(2) / dt;
+
+			} else {
+				// we only allow negative acceleration in order to takeoff
+				_v_I_dot(2) = fminf(_v_I_dot(2), 0.0f);
+			}
+
+			// integration: Euler forward
+			Vector3d temp_p_E_dot = Vector3d(_v_E(0), _v_E(1), _v_E(2));
+			_p_E = _p_E + temp_p_E_dot * dt;
+			_v_E = _v_E + _v_E_dot * dt;
+
+			Eulerf RPY = Eulerf(_q);
+			RPY(0) = 0.0f;	// no roll
+			RPY(1) = radians(0.0f); // pitch slightly up if needed to get some lift
+			_q = Quatf(RPY);
+			_w_B.setZero();
+			_grounded = true;
 		}
-
-	} else if (_vehicle == VehicleType::FW) {
-		if (!_grounded) {    // if we just hit the floor
-			// for the accelerometer, compute the acceleration that will stop the vehicle in one time step
-			_v_I_dot(2) = -_v_I(2) / dt;
-
-		} else {
-			// we only allow negative acceleration in order to takeoff
-			_v_I_dot(2) = fminf(_v_I_dot(2), 0.0f);
-		}
-
-		// integration: Euler forward
-		Vector3d temp_p_E_dot = Vector3d(_v_E(0), _v_E(1), _v_E(2));
-		_p_E = _p_E + temp_p_E_dot * dt;
-		_v_E = _v_E + _v_E_dot * dt;
-
-		Eulerf RPY = Eulerf(_q);
-		RPY(0) = 0.0f;	// no roll
-		RPY(1) = radians(0.0f); // pitch slightly up if needed to get some lift
-		_q = Quatf(RPY);
-		_w_B.setZero();
-		_grounded = true;
-		// }
 
 	} else {
-
-		// integration: Euler forward
-		Vector3d temp_p_E_dot = Vector3d(_v_E(0), _v_E(1), _v_E(2));
-		_p_E = _p_E + temp_p_E_dot * dt;
+		// forward Euler velocity intergation
+		Vector3d v_E_prev(_v_E(0), _v_E(1), _v_E(2));
 		_v_E = _v_E + _v_E_dot * dt;
+		// trapezoidal position integration
+		_p_E = _p_E + (Vector3d(_v_E(0), _v_E(1), _v_E(2)) + v_E_prev) * 0.5 * dt;
+
+		_dq = Quatf::expq(0.5f * dt * _w_B);
 
 		_q_E = _q_E  * _dq;
-
-
 		_q_E.normalize();
-		// integration Runge-Kutta 4
-		// rk4_update(_p_I, _v_I, _q, _w_B);
+
+		_w_B_dot = _Im1 * (_Mt_B + _Ma_B - _w_B.cross(_I * _w_B)); // conservation of angular momentum
 		_w_B = constrain(_w_B + _w_B_dot * dt, -6.0f * M_PI_F, 6.0f * M_PI_F);
 		_grounded = false;
-
 	}
 
 	ecefToNed();
-	// printf("lat: %f, lon: %f, alt: %f\n", _lat, _lon, (double)_alt);
-
-	if (abs(_LAT0 - 7.0) < 1e-3) {
-		_LAT0 = _lat;
-		_LON0 = _lon;
-		_H0 = _alt;
-	}
 
 	// lla to local:
 	project(_lat, _lon, _lpos(0), _lpos(1));
@@ -508,36 +505,58 @@ void Sih::ecefToNed()
 	double G = 0.5 * (sqrt(E * E + V) + E);
 	double T = sqrt(G * G + (F - V * G) / (2 * G - E)) - G;
 
-	// Compute latitude (L_b)
+	// Compute latitude
 	_lat = sign(_p_E(2)) * atan((1 - T * T) / (2 * T * sqrt(1 - e * e)));
 
-	// Compute height (h_b)
+	// Compute height
 	_alt = (beta - R_0 * T) * cos(_lat) +
 	       (_p_E(2) - sign(_p_E(2)) * R_0 * sqrt(1 - e * e)) * sin(_lat);
 
-	// Calculate the ECEF to NED coordinate transformation matrix (C_e_n)
-	double cos_lat = cos(_lat);
-	double sin_lat = sin(_lat);
-	double cos_long = cos(_lon);
-	double sin_long = sin(_lon);
-
-	float val[] = {(float)(sin_lat * cos_long), (float)(-sin_lat * sin_long), (float)cos_lat,
-		       (float) - sin_long, (float)cos_long,           0.f,
-		       (float)(-cos_lat * cos_long), (float)(-cos_lat * sin_long), (float) - sin_lat
-		      };
-
-	const Dcmf C_SE(val);
+	const Dcmf C_SE = computeRotEcefToNed(_lat, _lon, _alt);
 	_C_ES = C_SE.transpose();
 
 	// Transform velocity to NED frame
 	_v_S = C_SE * _v_E;
-	_q = Quatf(_C_ES) * _q_E;
+	_q = Quatf(C_SE) * _q_E;
+	_q.normalize();
+}
+
+Vector3d Sih::llaToEcef(const double lat, const double lon, const double alt)
+{
+	double R_0 = 6378137;
+	double e = 0.0818191908425;
+
+	double R_E = R_0 / sqrt(1 - std::pow(e * sin(lat), 2));
+
+	double cos_lat = cos(lat);
+	double sin_lat = sin(lat);
+	double cos_long = cos(lon);
+	double sin_long = sin(lon);
+	return Vector3d((R_E + alt) * cos_lat * cos_long,
+			(R_E + alt) * cos_lat * sin_long,
+			((1 - e * e) * R_E + alt) * sin_lat);
+}
+
+Dcmf Sih::computeRotEcefToNed(const double lat, const double lon, const double alt)
+{
+	// Calculate the ECEF to NED coordinate transformation matrix
+	double cos_lat = cos(lat);
+	double sin_lat = sin(lat);
+	double cos_long = cos(lon);
+	double sin_long = sin(lon);
+
+	float val[] = {(float)(-sin_lat * cos_long), (float)(-sin_lat * sin_long), (float)cos_lat,
+		       (float) - sin_long, (float)cos_long,           0.f,
+		       (float)(-cos_lat * cos_long), (float)(-cos_lat * sin_long), (float) - sin_lat
+		      };
+
+	return Dcmf(val);
 }
 
 void Sih::project(double lat, double lon, float &x, float &y) const
 {
-	const double lat_rad = math::radians(lat);
-	const double lon_rad = math::radians(lon);
+	const double lat_rad = lat;
+	const double lon_rad = lon;
 
 	const double sin_lat = sin(lat_rad);
 	const double cos_lat = cos(lat_rad);
@@ -567,11 +586,8 @@ void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
 	//     In 2018 IEEE International Conference on Robotics and Automation (ICRA), pp. 6573-6580. IEEE, 2018.
 
 	// IMU
-	// Vector3f acc = _C_SB.transpose() * (_v_I_dot - Vector3f(0.0f, 0.0f, CONSTANTS_ONE_G)) + noiseGauss3f(0.5f, 1.7f, 1.4f);
-	// Vector3f gyro = _w_B + noiseGauss3f(0.14f, 0.07f, 0.03f);
-
-	Vector3f vedot = _v_E_dot - Vector3f(gravity(0), gravity(1), gravity(2));
-	Vector3f acc = _q_E.rotateVectorInverse(vedot) + noiseGauss3f(0.5f, 1.7f, 1.4f);
+	Vector3f specific_force_E = _v_E_dot - gravity;
+	Vector3f acc = _q_E.rotateVectorInverse(specific_force_E) + noiseGauss3f(0.5f, 1.7f, 1.4f);
 	Vector3f gyro = _w_B + noiseGauss3f(0.14f, 0.07f, 0.03f);
 
 	// update IMU every iteration
@@ -647,8 +663,6 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 		_q.copyTo(attitude.q);
 		attitude.timestamp = hrt_absolute_time();
 		_attitude_ground_truth_pub.publish(attitude);
-
-
 	}
 
 	{
@@ -663,18 +677,11 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 
 		local_position.x = _lpos(0);
 		local_position.y = _lpos(1);
-		// local_position.z = _p_I(2);
-		local_position.z = -_alt;
-
-		// printf("local x: %f, y: %f, z: %f\n", (double)local_position.x, (double)local_position.y, (double)local_position.z);
+		local_position.z = -(static_cast<float>(_alt) - _H0);
 
 		local_position.vx = _v_S(0);
 		local_position.vy = _v_S(1);
 		local_position.vz = _v_S(2);
-
-		// local_position.vx = _v_I(0);
-		// local_position.vy = _v_I(1);
-		// local_position.vz = _v_I(2);
 
 		local_position.z_deriv = _v_I(2);
 
@@ -685,8 +692,8 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 		local_position.xy_global = true;
 		local_position.z_global = true;
 		local_position.ref_timestamp = _last_run;
-		local_position.ref_lat = _LAT0;
-		local_position.ref_lon = _LON0;
+		local_position.ref_lat = degrees(_LAT0);
+		local_position.ref_lon = degrees(_LON0);
 		local_position.ref_alt = _H0;
 
 		local_position.heading = Eulerf(_q).psi();
@@ -695,40 +702,6 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 
 		local_position.timestamp = hrt_absolute_time();
 		_local_position_ground_truth_pub.publish(local_position);
-
-		// printf("lpos x: %f, y: %f, z: %f\n", (double)local_position.x, (double)local_position.y, (double)local_position.z);
-
-
-		// printf("timestamp_sample %lld\n", local_position.timestamp_sample);
-		// printf("xy_valid %d\n", local_position.xy_valid);
-		// printf("z_valid %d\n", local_position.z_valid);
-		// printf("v_xy_valid %d\n", local_position.v_xy_valid);
-		// printf("v_z_valid %d\n", local_position.v_z_valid);
-		// printf("x %f\n", (double)local_position.x);
-		// printf("y %f\n", (double)local_position.y);
-		// printf("z %f\n", (double)local_position.z);
-		// printf("vx %f\n", (double)local_position.vx);
-		// printf("vy %f\n", (double)local_position.vy);
-		// printf("vz %f\n", (double)local_position.vz);
-		// printf("z_deriv %f\n", (double)local_position.z_deriv);
-		// printf("ax %f\n", (double)local_position.ax);
-		// printf("ay %f\n", (double)local_position.ay);
-		// printf("az %f\n", (double)local_position.az);
-		// printf("xy_global %d\n", local_position.xy_global);
-		// printf("z_global %d\n", local_position.z_global);
-		// printf("ref_timestamp %lld\n", local_position.ref_timestamp);
-		// printf("ref_lat %f\n", (double)local_position.ref_lat);
-		// printf("ref_lon %f\n", (double)local_position.ref_lon);
-		// printf("ref_alt %f\n", (double)local_position.ref_alt);
-		// printf("heading %f\n", (double)local_position.heading);
-		// printf("heading_good_for_control %d\n", local_position.heading_good_for_control);
-		// printf("unaided_heading %f\n", (double)local_position.unaided_heading);
-		// printf("timestamp %lld\n", local_position.timestamp);
-
-
-
-
-
 	}
 
 	{
@@ -737,28 +710,11 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 		global_position.timestamp_sample = time_now_us;
 		global_position.lat = degrees(_lat);
 		global_position.lon = degrees(_lon);
-		// global_position.alt = _H0 - _p_I(2);;
 		global_position.alt = _alt;
 		global_position.alt_ellipsoid = global_position.alt;
 		global_position.terrain_alt = -_lpos(2);
 		global_position.timestamp = hrt_absolute_time();
 		_global_position_ground_truth_pub.publish(global_position);
-
-		// printf("lat: %f, lon: %f, alt: %f\n", (double)global_position.lat, (double)global_position.lon, (double)global_position.alt);
-
-		// printf("timestamp_sample %lld\n", global_position.timestamp_sample);
-		// printf("lat %f\n", global_position.lat);
-		// printf("lon %f\n", global_position.lon);
-		// printf("alt %f\n", (double)global_position.alt);
-		// printf("alt_ellipsoid %f\n", (double)global_position.alt_ellipsoid);
-		// printf("terrain_alt %f\n", (double)global_position.terrain_alt);
-		// printf("timestamp %lld\n", global_position.timestamp);
-
-
-		// printf("H0 %f\n", (double)_H0);
-		// printf("p_I(2) %f\n", (double)_p_I(2));
-
-
 	}
 }
 

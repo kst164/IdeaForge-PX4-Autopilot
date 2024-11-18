@@ -461,8 +461,6 @@ void Sih::equations_of_motion(const float dt)
 		_p_E = _p_E + temp_p_E_dot * dt;
 		_v_E = _v_E + _v_E_dot * dt;
 
-		printf("v_E: %f %f %f\n", (double)_v_E(0), (double)_v_E(1), (double)_v_E(2));
-
 		_q_E = _q_E  * _dq;
 
 
@@ -511,11 +509,11 @@ void Sih::ecefToNed()
 	double T = sqrt(G * G + (F - V * G) / (2 * G - E)) - G;
 
 	// Compute latitude (L_b)
-	_lat = copysign(1.0, _p_E(2)) * atan((1 - T * T) / (2 * T * sqrt(1 - e * e)));
+	_lat = sign(_p_E(2)) * atan((1 - T * T) / (2 * T * sqrt(1 - e * e)));
 
 	// Compute height (h_b)
 	_alt = (beta - R_0 * T) * cos(_lat) +
-	       (_p_E(2) - copysign(1.0, _p_E(2)) * R_0 * sqrt(1 - e * e)) * sin(_lat);
+	       (_p_E(2) - sign(_p_E(2)) * R_0 * sqrt(1 - e * e)) * sin(_lat);
 
 	// Calculate the ECEF to NED coordinate transformation matrix (C_e_n)
 	double cos_lat = cos(_lat);
@@ -737,8 +735,8 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 		// publish global position groundtruth
 		vehicle_global_position_s global_position{};
 		global_position.timestamp_sample = time_now_us;
-		global_position.lat = _lat;
-		global_position.lon = _lon;
+		global_position.lat = degrees(_lat);
+		global_position.lon = degrees(_lon);
 		// global_position.alt = _H0 - _p_I(2);;
 		global_position.alt = _alt;
 		global_position.alt_ellipsoid = global_position.alt;

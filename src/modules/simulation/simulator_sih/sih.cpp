@@ -264,8 +264,6 @@ void Sih::parameters_updated()
 
 	_MASS = _sih_mass.get();
 
-	_W_I = Vector3f(0.0f, 0.0f, _MASS * CONSTANTS_ONE_G);
-
 	_I = diag(Vector3f(_sih_ixx.get(), _sih_iyy.get(), _sih_izz.get()));
 	_I(0, 1) = _I(1, 0) = _sih_ixy.get();
 	_I(0, 2) = _I(2, 0) = _sih_ixz.get();
@@ -343,13 +341,13 @@ void Sih::generate_force_and_torques()
 
 void Sih::generate_fw_aerodynamics()
 {
-	_v_B = Dcmf(_C_ES * _C_SB).transpose() * _v_E;	// velocity in body frame [m/s]
+	const Vector3f v_B = _q_E.rotateVectorInverse(_v_E);
 	float altitude = _lpos_ref_alt - _lpos(2);
-	_wing_l.update_aero(_v_B, _w_B, altitude, _u[0]*FLAP_MAX);
-	_wing_r.update_aero(_v_B, _w_B, altitude, -_u[0]*FLAP_MAX);
-	_tailplane.update_aero(_v_B, _w_B, altitude, _u[1]*FLAP_MAX, _T_MAX * _u[3]);
-	_fin.update_aero(_v_B, _w_B, altitude, _u[2]*FLAP_MAX, _T_MAX * _u[3]);
-	_fuselage.update_aero(_v_B, _w_B, altitude);
+	_wing_l.update_aero(v_B, _w_B, altitude, _u[0]*FLAP_MAX);
+	_wing_r.update_aero(v_B, _w_B, altitude, -_u[0]*FLAP_MAX);
+	_tailplane.update_aero(v_B, _w_B, altitude, _u[1]*FLAP_MAX, _T_MAX * _u[3]);
+	_fin.update_aero(v_B, _w_B, altitude, _u[2]*FLAP_MAX, _T_MAX * _u[3]);
+	_fuselage.update_aero(v_B, _w_B, altitude);
 
 	// sum of aerodynamic forces
 	_Fa_I = _C_SB * (_wing_l.get_Fa() + _wing_r.get_Fa() + _tailplane.get_Fa() + _fin.get_Fa() + _fuselage.get_Fa()) - _KDV
@@ -362,10 +360,10 @@ void Sih::generate_fw_aerodynamics()
 void Sih::generate_ts_aerodynamics()
 {
 	// velocity in body frame [m/s]
-	_v_B = Dcmf(_C_ES * _C_SB).transpose() * _v_E;
+	const Vector3f v_B = _q_E.rotateVectorInverse(_v_E);
 
 	// the aerodynamic is resolved in a frame like a standard aircraft (nose-right-belly)
-	Vector3f v_ts = _C_BS.transpose() * _v_B;
+	Vector3f v_ts = _C_BS.transpose() * v_B;
 	Vector3f w_ts = _C_BS.transpose() * _w_B;
 	float altitude = _lpos_ref_alt - _lpos(2);
 
@@ -572,7 +570,8 @@ void Sih::send_airspeed(const hrt_abstime &time_now_us)
 	airspeed_s airspeed{};
 	airspeed.timestamp_sample = time_now_us;
 	// airspeed sensor is mounted along the negative Z axis since the vehicle is a tailsitter
-	airspeed.true_airspeed_m_s = fmaxf(0.1f, -_v_B(2) + generate_wgn() * 0.2f);
+	const Vector3f v_B = _q_E.rotateVectorInverse(_v_E);
+	airspeed.true_airspeed_m_s = fmaxf(0.1f, -v_B(2) + generate_wgn() * 0.2f);
 	airspeed.indicated_airspeed_m_s = airspeed.true_airspeed_m_s * sqrtf(_wing_l.get_rho() / RHO);
 	airspeed.air_temperature_celsius = NAN;
 	airspeed.confidence = 0.7f;

@@ -219,7 +219,6 @@ private:
 	matrix::Vector3f    _Ma_B{};          // aerodynamic moments in the body frame [Nm]
 	matrix::Vector3f    _lpos{};          // position in a local tangent-plane frame [m]
 	matrix::Vector3f    _v_I{};           // inertial velocity [m/s]
-	matrix::Vector3f    _v_B{};           // body frame velocity [m/s]
 	matrix::Vector3f    _p_I_dot{};       // inertial position differential
 	matrix::Vector3f    _v_I_dot{};       // inertial velocity differential
 	matrix::Quatf       _q{};             // quaternion attitude
@@ -283,7 +282,6 @@ private:
 	MapProjection _lpos_ref{};
 	float _lpos_ref_alt;
 	float _MASS, _T_MAX, _Q_MAX, _L_ROLL, _L_PITCH, _KDV, _KDW, _T_TAU;
-	matrix::Vector3f _W_I;  // weight of the vehicle in inertial frame [N]
 	matrix::Matrix3f _I;    // vehicle inertia matrix
 	matrix::Matrix3f _Im1;  // inverse of the inertia matrix
 

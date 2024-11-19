@@ -410,9 +410,8 @@ void Sih::equations_of_motion(const float dt)
 	const float gravity_norm = computeGravity(_lat);
 	gravity = Vector3f(_C_ES.col(2)) * gravity_norm;
 	Vector3f coriolis = coriolisAcceleration(_v_E);
-	Vector3f Fa_E = gravity + coriolis;
 
-	_v_E_dot = Fa_E + (_q_E.rotateVector(_T_B)) / _MASS;
+	_v_E_dot = gravity + coriolis + (_C_ES * _Fa_I + _q_E.rotateVector(_T_B)) / _MASS;
 	_v_I_dot = _C_ES.transpose() * _v_E_dot;
 
 

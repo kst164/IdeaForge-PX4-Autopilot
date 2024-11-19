@@ -455,9 +455,9 @@ void Sih::equations_of_motion(const float dt)
 		// trapezoidal position integration
 		_p_E = _p_E + (Vector3d(_v_E(0), _v_E(1), _v_E(2)) + v_E_prev) * 0.5 * dt;
 
-		_dq = Quatf::expq(0.5f * dt * _w_B);
+		const Quatf dq(AxisAnglef(_w_B * dt));
 
-		_q_E = _q_E  * _dq;
+		_q_E = _q_E  * dq;
 		_q_E.normalize();
 
 		const Vector3f w_B_dot = _Im1 * (_Mt_B + _Ma_B - _w_B.cross(_I * _w_B)); // conservation of angular momentum

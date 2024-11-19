@@ -285,7 +285,7 @@ void Sih::init_variables()
 
 	_lpos = Vector3f(0.0f, 0.0f, 0.0f);
 	_v_N = Vector3f(0.0f, 0.0f, 0.0f);
-	_p_E = Vector3d(_ecef.a, 0.0, 0.0);
+	_p_E = Vector3d(Wgs84::equatorial_radius, 0.0, 0.0);
 	_v_E = Vector3f(0.0f, 0.0f, 0.0f);
 	_q = Quatf(1.0f, 0.0f, 0.0f, 0.0f);
 	_q_E = Quatf(Eulerf(0.f, -M_PI_2_F, 0.f));
@@ -391,16 +391,16 @@ void Sih::generate_ts_aerodynamics()
 float Sih::computeGravity(const double lat)
 {
 	// Somigliana formula for gravitational acceleration
-	double sin_lat = sin(lat);
-	double g = _ecef.g_e * (1 + 0.001931851353 * sin_lat * sin_lat) / sqrt(1 - _ecef.e2 * sin_lat * sin_lat);
+	const double sin_lat = sin(lat);
+	const double g = Wgs84::gravity_equator * (1.0 + 0.001931851353 * sin_lat * sin_lat) / sqrt(
+				 1.0 - Wgs84::eccentricity2 * sin_lat * sin_lat);
 	return static_cast<float>(g);
 }
 
 void Sih::equations_of_motion(const float dt)
 {
-	const float gravity_norm = computeGravity(_lat);
-	_gravity_E = Vector3f(_R_N2E.col(2)) * gravity_norm;
-	Vector3f coriolis_E = 2.f * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE).cross(_v_E);
+	_gravity_E = Vector3f(_R_N2E.col(2)) * computeGravity(_lat); // assume gravity along the Down axis
+	const Vector3f coriolis_E = 2.f * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE).cross(_v_E);
 
 	_v_E_dot = _gravity_E + coriolis_E + (_R_N2E * _Fa_N + _q_E.rotateVector(_T_B)) / _MASS;
 	_v_N_dot = _R_N2E.transpose() * _v_E_dot;
@@ -474,32 +474,23 @@ void Sih::equations_of_motion(const float dt)
 void Sih::ecefToNed()
 {
 	// Convert position using Borkowski closed-form exact solution
-	double R_0 = 6378137; // WGS84 Equatorial radius in meters
-	double e = 0.0818191908425; // WGS84 eccentricity
+	const double k1 = sqrt(1 - Wgs84::eccentricity2) * std::abs(_p_E(2));
+	const double k2 = Wgs84::eccentricity2 * Wgs84::equatorial_radius;
+	const double beta = sqrt(_p_E(0) * _p_E(0) + _p_E(1) * _p_E(1));
+	const double E = (k1 - k2) / beta;
+	const double F = (k1 + k2) / beta;
 
-	// Compute longitude (lambda_b)
+	const double P = 4.0 / 3.0 * (E * F + 1);
+	const double Q = 2 * (E * E - F * F);
+	const double D = P * P * P + Q * Q;
+	const double V = pow(sqrt(D) - Q, 1.0 / 3.0) - pow(sqrt(D) + Q, 1.0 / 3.0);
+	const double G = 0.5 * (sqrt(E * E + V) + E);
+	const double T = sqrt(G * G + (F - V * G) / (2 * G - E)) - G;
+
 	_lon = atan2(_p_E(1), _p_E(0));
-
-	// Compute auxiliary quantities
-	double k1 = sqrt(1 - e * e) * std::abs(_p_E(2));
-	double k2 = e * e * R_0;
-	double beta = sqrt(_p_E(0) * _p_E(0) + _p_E(1) * _p_E(1));
-	double E = (k1 - k2) / beta;
-	double F = (k1 + k2) / beta;
-
-	double P = 4.0 / 3.0 * (E * F + 1);
-	double Q = 2 * (E * E - F * F);
-	double D = P * P * P + Q * Q;
-	double V = pow(sqrt(D) - Q, 1.0 / 3.0) - pow(sqrt(D) + Q, 1.0 / 3.0);
-	double G = 0.5 * (sqrt(E * E + V) + E);
-	double T = sqrt(G * G + (F - V * G) / (2 * G - E)) - G;
-
-	// Compute latitude
-	_lat = sign(_p_E(2)) * atan((1 - T * T) / (2 * T * sqrt(1 - e * e)));
-
-	// Compute height
-	_alt = (beta - R_0 * T) * cos(_lat) +
-	       (_p_E(2) - sign(_p_E(2)) * R_0 * sqrt(1 - e * e)) * sin(_lat);
+	_lat = sign(_p_E(2)) * atan((1 - T * T) / (2 * T * sqrt(1 - Wgs84::eccentricity2)));
+	_alt = (beta - Wgs84::equatorial_radius * T) * cos(_lat) +
+	       (_p_E(2) - sign(_p_E(2)) * Wgs84::equatorial_radius * sqrt(1 - Wgs84::eccentricity2)) * sin(_lat);
 
 	const Dcmf C_SE = computeRotEcefToNed(_lat, _lon, _alt);
 	_R_N2E = C_SE.transpose();
@@ -512,32 +503,30 @@ void Sih::ecefToNed()
 
 Vector3d Sih::llaToEcef(const double lat, const double lon, const double alt)
 {
-	double R_0 = 6378137;
-	double e = 0.0818191908425;
+	const double r_e = Wgs84::equatorial_radius / sqrt(1 - std::pow(Wgs84::eccentricity * sin(lat), 2));
 
-	double R_E = R_0 / sqrt(1 - std::pow(e * sin(lat), 2));
+	const double cos_lat = cos(lat);
+	const double sin_lat = sin(lat);
+	const double cos_lon = cos(lon);
+	const double sin_lon = sin(lon);
 
-	double cos_lat = cos(lat);
-	double sin_lat = sin(lat);
-	double cos_long = cos(lon);
-	double sin_long = sin(lon);
-	return Vector3d((R_E + alt) * cos_lat * cos_long,
-			(R_E + alt) * cos_lat * sin_long,
-			((1 - e * e) * R_E + alt) * sin_lat);
+	return Vector3d((r_e + alt) * cos_lat * cos_lon,
+			(r_e + alt) * cos_lat * sin_lon,
+			((1.0 - Wgs84::eccentricity2) * r_e + alt) * sin_lat);
 }
 
 Dcmf Sih::computeRotEcefToNed(const double lat, const double lon, const double alt)
 {
 	// Calculate the ECEF to NED coordinate transformation matrix
-	double cos_lat = cos(lat);
-	double sin_lat = sin(lat);
-	double cos_long = cos(lon);
-	double sin_long = sin(lon);
+	const double cos_lat = cos(lat);
+	const double sin_lat = sin(lat);
+	const double cos_lon = cos(lon);
+	const double sin_lon = sin(lon);
 
-	float val[] = {(float)(-sin_lat * cos_long), (float)(-sin_lat * sin_long), (float)cos_lat,
-		       (float) - sin_long, (float)cos_long,           0.f,
-		       (float)(-cos_lat * cos_long), (float)(-cos_lat * sin_long), (float) - sin_lat
-		      };
+	const float val[] = {(float)(-sin_lat * cos_lon), (float)(-sin_lat * sin_lon), (float)cos_lat,
+			     (float) - sin_lon, (float)cos_lon, 0.f,
+			     (float)(-cos_lat * cos_lon), (float)(-cos_lat * sin_lon), (float) - sin_lat
+			    };
 
 	return Dcmf(val);
 }

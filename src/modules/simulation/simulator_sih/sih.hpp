@@ -166,19 +166,15 @@ private:
 	float computeGravity(double lat);
 
 	void ecefToNed();
-	matrix::Vector3d llaToEcef(double lat, double lon, double alt);
+	static matrix::Vector3d llaToEcef(double lat, double lon, double alt);
 	matrix::Dcmf computeRotEcefToNed(const double lat, const double lon, const double alt);
 
-	struct EcefConst {
-		const double a = 6378137.0;                // Semi-major axis (equatorial radius) in meters
-		// const double b = 6356752.3142;             // Semi-minor axis (polar radius) in meters
-		const double f = 1 / 298.257223563;        // Flattening
-		const double e2 = 2 * f - f * f;           // Square of eccentricity
-		const double g_e = 9.7803253359;           // Gravity at the equator (m/s^2)
-		const double g_p = 9.8321849378;
+	struct Wgs84 {
+		static constexpr double equatorial_radius = 6378137.0;
+		static constexpr double eccentricity = 0.0818191908425;
+		static constexpr double eccentricity2 = eccentricity * eccentricity;
+		static constexpr double gravity_equator = 9.7803253359;
 	};
-
-	EcefConst _ecef;
 
 	matrix::Vector3d _p_E;
 	matrix::Vector3f _v_E;

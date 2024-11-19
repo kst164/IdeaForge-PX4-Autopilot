@@ -189,8 +189,7 @@ private:
 	double _lat;
 	double _lon;
 	double _alt;
-	matrix::Dcmf _C_ES;
-	matrix::Vector3f _v_S;
+	matrix::Dcmf _R_N2E;
 
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
 	void lockstep_loop();
@@ -214,16 +213,15 @@ private:
 	bool        _grounded{true};// whether the vehicle is on the ground
 
 	matrix::Vector3f    _T_B{};           // thrust force in body frame [N]
-	matrix::Vector3f    _Fa_I{};          // aerodynamic force in inertial frame [N]
+	matrix::Vector3f    _Fa_N{};          // aerodynamic force in local navigation frame [N]
 	matrix::Vector3f    _Mt_B{};          // thruster moments in the body frame [Nm]
 	matrix::Vector3f    _Ma_B{};          // aerodynamic moments in the body frame [Nm]
 	matrix::Vector3f    _lpos{};          // position in a local tangent-plane frame [m]
-	matrix::Vector3f    _v_I{};           // inertial velocity [m/s]
-	matrix::Vector3f    _p_I_dot{};       // inertial position differential
-	matrix::Vector3f    _v_I_dot{};       // inertial velocity differential
-	matrix::Quatf       _q{};             // quaternion attitude
-	matrix::Quatf       _q_E{};             // quaternion attitude
-	matrix::Dcmf        _C_SB{};          // body to inertial transformation
+	matrix::Vector3f    _v_N{};           // velocity in local navigation frame (NED, body-fixed) [m/s]
+	matrix::Vector3f    _v_N_dot{};       // time derivative of velocity in local navigation frame [m/s2]
+	matrix::Quatf       _q{};             // quaternion attitude in local navigation frame
+	matrix::Quatf       _q_E{};           // quaternion attitude in ECEF
+	matrix::Dcmf        _R_B2N{};         // body to local navigation transformation
 	matrix::Vector3f    _w_B{};           // body rates in body frame [rad/s]
 	matrix::Quatf       _dq{};            // quaternion differential
 	matrix::Vector3f    _w_B_dot{};       // body rates differential
@@ -249,7 +247,7 @@ private:
 	static constexpr const float TS_CM = 0.115f;	// longitudinal position of the CM from trailing edge
 	static constexpr const float TS_RP = 0.0625f;	// propeller radius [m]
 	static constexpr const float TS_DEF_MAX = math::radians(39.0f); 	// max deflection
-	matrix::Dcmf _C_BS = matrix::Dcmf(matrix::Eulerf(0.0f, math::radians(90.0f), 0.0f)); // segment to body 90 deg pitch
+	matrix::Dcmf _R_S2B = matrix::Dcmf(matrix::Eulerf(0.0f, math::radians(90.0f), 0.0f)); // segment to body 90 deg pitch
 	AeroSeg _ts[NB_TS_SEG] = {
 		AeroSeg(0.0225f, 0.110f, 0.0f, matrix::Vector3f(0.083f - TS_CM, -0.239f, 0.0f), 0.0f, TS_AR),
 		AeroSeg(0.0383f, 0.125f, 0.0f, matrix::Vector3f(0.094f - TS_CM, -0.208f, 0.0f), 0.0f, TS_AR, 0.063f),

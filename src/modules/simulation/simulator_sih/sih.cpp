@@ -396,18 +396,13 @@ float Sih::computeGravity(const double lat)
 	return static_cast<float>(g);
 }
 
-Vector3f Sih::coriolisAcceleration(const Vector3f &velocity)
-{
-	return 2.f * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE).cross(velocity);
-}
-
 void Sih::equations_of_motion(const float dt)
 {
 	const float gravity_norm = computeGravity(_lat);
 	_gravity_E = Vector3f(_R_N2E.col(2)) * gravity_norm;
-	Vector3f coriolis = coriolisAcceleration(_v_E);
+	Vector3f coriolis_E = 2.f * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE).cross(_v_E);
 
-	_v_E_dot = _gravity_E + coriolis + (_R_N2E * _Fa_N + _q_E.rotateVector(_T_B)) / _MASS;
+	_v_E_dot = _gravity_E + coriolis_E + (_R_N2E * _Fa_N + _q_E.rotateVector(_T_B)) / _MASS;
 	_v_N_dot = _R_N2E.transpose() * _v_E_dot;
 
 	// fake ground, avoid free fall

@@ -164,10 +164,7 @@ private:
 	void generate_ts_aerodynamics();
 	void sensor_step();
 	float computeGravity(double lat);
-	matrix::Vector3f coriolisAcceleration(const matrix::Vector3f &velocity);
-	matrix::Vector3d centrifugalAcceleration(const matrix::Vector3d &position);
 
-	void rotationToSurfaceFrame();
 	void ecefToNed();
 	matrix::Vector3d llaToEcef(double lat, double lon, double alt);
 	matrix::Dcmf computeRotEcefToNed(const double lat, const double lon, const double alt);

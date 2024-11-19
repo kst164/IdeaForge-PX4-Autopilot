@@ -465,8 +465,8 @@ void Sih::equations_of_motion(const float dt)
 		_q_E = _q_E  * _dq;
 		_q_E.normalize();
 
-		_w_B_dot = _Im1 * (_Mt_B + _Ma_B - _w_B.cross(_I * _w_B)); // conservation of angular momentum
-		_w_B = constrain(_w_B + _w_B_dot * dt, -6.0f * M_PI_F, 6.0f * M_PI_F);
+		const Vector3f w_B_dot = _Im1 * (_Mt_B + _Ma_B - _w_B.cross(_I * _w_B)); // conservation of angular momentum
+		_w_B = constrain(_w_B + w_B_dot * dt, -6.0f * M_PI_F, 6.0f * M_PI_F);
 		_grounded = false;
 	}
 

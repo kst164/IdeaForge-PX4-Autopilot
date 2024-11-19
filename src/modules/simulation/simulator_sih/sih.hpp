@@ -223,7 +223,6 @@ private:
 	matrix::Quatf       _q_E{};           // quaternion attitude in ECEF
 	matrix::Vector3f    _w_B{};           // body rates in body frame [rad/s]
 	matrix::Quatf       _dq{};            // quaternion differential
-	matrix::Vector3f    _w_B_dot{};       // body rates differential
 	float       _u[NB_MOTORS] {};         // thruster signals
 
 	matrix::Vector3f gravity{};

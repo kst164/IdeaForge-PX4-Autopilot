@@ -538,9 +538,13 @@ void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
 	//     In 2018 IEEE International Conference on Robotics and Automation (ICRA), pp. 6573-6580. IEEE, 2018.
 
 	// IMU
-	Vector3f specific_force_E = _v_E_dot - _gravity_E;
-	Vector3f acc = _q_E.rotateVectorInverse(specific_force_E) + noiseGauss3f(0.5f, 1.7f, 1.4f);
-	Vector3f gyro = _w_B + noiseGauss3f(0.14f, 0.07f, 0.03f);
+	const Dcmf R_E2B(_q_E.inversed());
+
+	Vector3f specific_force_B = R_E2B * (_v_E_dot - _gravity_E);
+	Vector3f acc = specific_force_B + noiseGauss3f(0.5f, 1.7f, 1.4f);
+
+	const Vector3f earth_spin_rate_B = R_E2B * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE);
+	Vector3f gyro = _w_B + earth_spin_rate_B + noiseGauss3f(0.14f, 0.07f, 0.03f);
 
 	// update IMU every iteration
 	_px4_accel.update(time_now_us, acc(0), acc(1), acc(2));

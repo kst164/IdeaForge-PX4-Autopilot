@@ -63,6 +63,7 @@
 #include <conversion/rotation.h>    // math::radians,
 #include <lib/atmosphere/atmosphere.h>        // to get the physical constants
 #include <drivers/drv_hrt.h>        // to get the real time
+#include <geo/geo.h>
 #include <lib/drivers/accelerometer/PX4Accelerometer.hpp>
 #include <lib/drivers/gyroscope/PX4Gyroscope.hpp>
 #include <lib/perf/perf_counter.h>
@@ -166,7 +167,6 @@ private:
 	matrix::Vector3f coriolisAcceleration(const matrix::Vector3f &velocity);
 	matrix::Vector3d centrifugalAcceleration(const matrix::Vector3d &position);
 
-	void project(double lat, double lon, float &x, float &y) const;
 	void rotationToSurfaceFrame();
 	void ecefToNed();
 	matrix::Vector3d llaToEcef(double lat, double lon, double alt);
@@ -191,10 +191,6 @@ private:
 	double _alt;
 	matrix::Dcmf _C_ES;
 	matrix::Vector3f _v_S;
-
-	const float Omega_e = 7.2921159e-5;      // Earth's angular velocity (rad/s)
-
-
 
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
 	void lockstep_loop();
@@ -284,8 +280,9 @@ private:
 	// 	};
 
 	// parameters
-	float _MASS, _T_MAX, _Q_MAX, _L_ROLL, _L_PITCH, _KDV, _KDW, _H0, _T_TAU;
-	double _LAT0, _LON0;
+	MapProjection _lpos_ref{};
+	float _lpos_ref_alt;
+	float _MASS, _T_MAX, _Q_MAX, _L_ROLL, _L_PITCH, _KDV, _KDW, _T_TAU;
 	matrix::Vector3f _W_I;  // weight of the vehicle in inertial frame [N]
 	matrix::Matrix3f _I;    // vehicle inertia matrix
 	matrix::Matrix3f _Im1;  // inverse of the inertia matrix

@@ -242,17 +242,16 @@ void Sih::parameters_updated()
 	_KDV = _sih_kdv.get();
 	_KDW = _sih_kdw.get();
 
-	if ((fabsf(static_cast<float>(_LAT0) - radians(_sih_lat0.get())) > FLT_EPSILON)
-	    || (fabsf(static_cast<float>(_LON0) - radians(_sih_lon0.get())) > FLT_EPSILON)
-	    || (fabsf(_H0 - _sih_h0.get()) > FLT_EPSILON)) {
-		_LAT0 = (double)radians(_sih_lat0.get());
-		_LON0 = (double)radians(_sih_lon0.get());
-		_H0 = _sih_h0.get();
+	if ((fabsf(static_cast<float>(_lpos_ref.getProjectionReferenceLat()) - _sih_lat0.get()) > FLT_EPSILON)
+	    || (fabsf(static_cast<float>(_lpos_ref.getProjectionReferenceLon()) - _sih_lon0.get()) > FLT_EPSILON)
+	    || (fabsf(_lpos_ref_alt - _sih_h0.get()) > FLT_EPSILON)) {
+		_lpos_ref.initReference(static_cast<double>(_sih_lat0.get()), static_cast<double>(_sih_lon0.get()));
+		_lpos_ref_alt = _sih_h0.get();
 
 		// Reset earth position, velocity and attitude
-		_lat = _LAT0;
-		_lon = _LON0;
-		_alt = static_cast<double>(_H0);
+		_lat = radians(static_cast<double>(_sih_lat0.get()));
+		_lon = radians(static_cast<double>(_sih_lon0.get()));
+		_alt = static_cast<double>(_lpos_ref_alt);
 		_p_E = llaToEcef(_lat, _lon, _alt);
 
 		const Dcmf C_SE = computeRotEcefToNed(_lat, _lon, _alt);
@@ -345,7 +344,7 @@ void Sih::generate_force_and_torques()
 void Sih::generate_fw_aerodynamics()
 {
 	_v_B = Dcmf(_C_ES * _C_SB).transpose() * _v_E;	// velocity in body frame [m/s]
-	float altitude = _H0 - _lpos(2);
+	float altitude = _lpos_ref_alt - _lpos(2);
 	_wing_l.update_aero(_v_B, _w_B, altitude, _u[0]*FLAP_MAX);
 	_wing_r.update_aero(_v_B, _w_B, altitude, -_u[0]*FLAP_MAX);
 	_tailplane.update_aero(_v_B, _w_B, altitude, _u[1]*FLAP_MAX, _T_MAX * _u[3]);
@@ -368,7 +367,7 @@ void Sih::generate_ts_aerodynamics()
 	// the aerodynamic is resolved in a frame like a standard aircraft (nose-right-belly)
 	Vector3f v_ts = _C_BS.transpose() * _v_B;
 	Vector3f w_ts = _C_BS.transpose() * _w_B;
-	float altitude = _H0 - _lpos(2);
+	float altitude = _lpos_ref_alt - _lpos(2);
 
 	Vector3f Fa_ts{};
 	Vector3f Ma_ts{};
@@ -399,8 +398,7 @@ float Sih::computeGravity(const double lat)
 
 Vector3f Sih::coriolisAcceleration(const Vector3f &velocity)
 {
-	Vector3f Omega_e_vec(0.f, 0.f, Omega_e);
-	return 2.f * Omega_e_vec.cross(velocity);
+	return 2.f * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE).cross(velocity);
 }
 
 void Sih::equations_of_motion(const float dt)
@@ -418,7 +416,7 @@ void Sih::equations_of_motion(const float dt)
 	// fake ground, avoid free fall
 	double vertical_acc = Vector3d(_v_E_dot(0), _v_E_dot(1), _v_E_dot(2)).dot(_p_E) / _p_E.norm();
 
-	if ((static_cast<float>(_alt) - _H0) < 0.f && (vertical_acc <= 0.0 || _v_I(2) > 0.f)) {
+	if ((static_cast<float>(_alt) - _lpos_ref_alt) < 0.f && (vertical_acc <= 0.0 || _v_I(2) > 0.f)) {
 		if (_vehicle == VehicleType::MC || _vehicle == VehicleType::TS) {
 			if (!_grounded) {    // if we just hit the floor
 				// for the accelerometer, compute the acceleration that will stop the vehicle in one time step
@@ -477,9 +475,8 @@ void Sih::equations_of_motion(const float dt)
 
 	ecefToNed();
 
-	// lla to local:
-	project(_lat, _lon, _lpos(0), _lpos(1));
-	_lpos(2) = -(static_cast<float>(_alt) - _H0);
+	_lpos_ref.project(degrees(_lat), degrees(_lon), _lpos(0), _lpos(1));
+	_lpos(2) = -(static_cast<float>(_alt) - _lpos_ref_alt);
 }
 
 void Sih::ecefToNed()
@@ -551,32 +548,6 @@ Dcmf Sih::computeRotEcefToNed(const double lat, const double lon, const double a
 		      };
 
 	return Dcmf(val);
-}
-
-void Sih::project(double lat, double lon, float &x, float &y) const
-{
-	const double lat_rad = lat;
-	const double lon_rad = lon;
-
-	const double sin_lat = sin(lat_rad);
-	const double cos_lat = cos(lat_rad);
-
-	const double cos_d_lon = cos(lon_rad - _LON0);
-
-	const double _ref_sin_lat = sin(_LAT0);
-	const double _ref_cos_lat = cos(_LAT0);
-
-	const double arg = math::constrain(_ref_sin_lat * sin_lat + _ref_cos_lat * cos_lat * cos_d_lon, -1.0,  1.0);
-	const double c = acos(arg);
-
-	double k = 1.0;
-
-	if (fabs(c) > 0) {
-		k = (c / sin(c));
-	}
-
-	x = static_cast<float>(k * (_ref_cos_lat * sin_lat - _ref_sin_lat * cos_lat * cos_d_lon) * CONSTANTS_RADIUS_OF_EARTH);
-	y = static_cast<float>(k * cos_lat * sin(lon_rad - _LON0) * CONSTANTS_RADIUS_OF_EARTH);
 }
 
 void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
@@ -692,9 +663,9 @@ void Sih::publish_ground_truth(const hrt_abstime &time_now_us)
 		local_position.xy_global = true;
 		local_position.z_global = true;
 		local_position.ref_timestamp = _last_run;
-		local_position.ref_lat = degrees(_LAT0);
-		local_position.ref_lon = degrees(_LON0);
-		local_position.ref_alt = _H0;
+		local_position.ref_lat = _lpos_ref.getProjectionReferenceLat();
+		local_position.ref_lon = _lpos_ref.getProjectionReferenceLon();
+		local_position.ref_alt = _lpos_ref_alt;
 
 		local_position.heading = Eulerf(_q).psi();
 		local_position.heading_good_for_control = true;

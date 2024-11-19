@@ -176,13 +176,6 @@ private:
 		static constexpr double gravity_equator = 9.7803253359;
 	};
 
-	matrix::Vector3d _p_E;
-	matrix::Vector3f _v_E;
-	matrix::Vector3f _v_E_dot;
-	double _lat;
-	double _lon;
-	double _alt;
-	matrix::Dcmf _R_N2E;
 
 #if defined(ENABLE_LOCKSTEP_SCHEDULER)
 	void lockstep_loop();
@@ -213,11 +206,21 @@ private:
 	matrix::Vector3f    _v_N{};           // velocity in local navigation frame (NED, body-fixed) [m/s]
 	matrix::Vector3f    _v_N_dot{};       // time derivative of velocity in local navigation frame [m/s2]
 	matrix::Quatf       _q{};             // quaternion attitude in local navigation frame
-	matrix::Quatf       _q_E{};           // quaternion attitude in ECEF
 	matrix::Vector3f    _w_B{};           // body rates in body frame [rad/s]
-	float       _u[NB_MOTORS] {};         // thruster signals
 
-	matrix::Vector3f _gravity_E{};
+	double              _lat{0.0};
+	double              _lon{0.0};
+	double              _alt{0.0};
+
+	// Quantities in Earth-centered-Earth-fixed coordinates
+	matrix::Vector3f    _gravity_E{};
+	matrix::Quatf       _q_E{};
+	matrix::Vector3d    _p_E{};
+	matrix::Vector3f    _v_E{};
+	matrix::Vector3f    _v_E_dot{};
+	matrix::Dcmf        _R_N2E;           // local navigation to ECEF frame rotation matrix
+
+	float       _u[NB_MOTORS] {};         // thruster signals
 
 	enum class VehicleType {MC, FW, TS};
 	VehicleType _vehicle = VehicleType::MC;

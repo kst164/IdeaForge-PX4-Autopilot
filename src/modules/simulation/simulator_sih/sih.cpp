@@ -404,10 +404,10 @@ Vector3f Sih::coriolisAcceleration(const Vector3f &velocity)
 void Sih::equations_of_motion(const float dt)
 {
 	const float gravity_norm = computeGravity(_lat);
-	gravity = Vector3f(_R_N2E.col(2)) * gravity_norm;
+	_gravity_E = Vector3f(_R_N2E.col(2)) * gravity_norm;
 	Vector3f coriolis = coriolisAcceleration(_v_E);
 
-	_v_E_dot = gravity + coriolis + (_R_N2E * _Fa_N + _q_E.rotateVector(_T_B)) / _MASS;
+	_v_E_dot = _gravity_E + coriolis + (_R_N2E * _Fa_N + _q_E.rotateVector(_T_B)) / _MASS;
 	_v_N_dot = _R_N2E.transpose() * _v_E_dot;
 
 	// fake ground, avoid free fall
@@ -554,7 +554,7 @@ void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
 	//     In 2018 IEEE International Conference on Robotics and Automation (ICRA), pp. 6573-6580. IEEE, 2018.
 
 	// IMU
-	Vector3f specific_force_E = _v_E_dot - gravity;
+	Vector3f specific_force_E = _v_E_dot - _gravity_E;
 	Vector3f acc = _q_E.rotateVectorInverse(specific_force_E) + noiseGauss3f(0.5f, 1.7f, 1.4f);
 	Vector3f gyro = _w_B + noiseGauss3f(0.14f, 0.07f, 0.03f);
 

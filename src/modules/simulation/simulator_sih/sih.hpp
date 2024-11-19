@@ -225,7 +225,7 @@ private:
 	matrix::Quatf       _dq{};            // quaternion differential
 	float       _u[NB_MOTORS] {};         // thruster signals
 
-	matrix::Vector3f gravity{};
+	matrix::Vector3f _gravity_E{};
 
 	enum class VehicleType {MC, FW, TS};
 	VehicleType _vehicle = VehicleType::MC;

@@ -221,7 +221,6 @@ private:
 	matrix::Vector3f    _v_N_dot{};       // time derivative of velocity in local navigation frame [m/s2]
 	matrix::Quatf       _q{};             // quaternion attitude in local navigation frame
 	matrix::Quatf       _q_E{};           // quaternion attitude in ECEF
-	matrix::Dcmf        _R_B2N{};         // body to local navigation transformation
 	matrix::Vector3f    _w_B{};           // body rates in body frame [rad/s]
 	matrix::Quatf       _dq{};            // quaternion differential
 	matrix::Vector3f    _w_B_dot{};       // body rates differential

@@ -350,8 +350,9 @@ void Sih::generate_fw_aerodynamics()
 	_fuselage.update_aero(v_B, _w_B, altitude);
 
 	// sum of aerodynamic forces
-	_Fa_N = _R_B2N * (_wing_l.get_Fa() + _wing_r.get_Fa() + _tailplane.get_Fa() + _fin.get_Fa() + _fuselage.get_Fa()) - _KDV
-		* _v_N;
+	const Vector3f Fa_B = _wing_l.get_Fa() + _wing_r.get_Fa() + _tailplane.get_Fa() + _fin.get_Fa() + _fuselage.get_Fa() -
+			      _KDV * v_B;
+	_Fa_N = _q.rotateVector(Fa_B);
 
 	// aerodynamic moments
 	_Ma_B = _wing_l.get_Ma() + _wing_r.get_Ma() + _tailplane.get_Ma() + _fin.get_Ma() + _fuselage.get_Ma() - _KDW * _w_B;
@@ -382,7 +383,8 @@ void Sih::generate_ts_aerodynamics()
 		Ma_ts += _ts[i].get_Ma();
 	}
 
-	_Fa_N = _R_B2N * _R_S2B * Fa_ts - _KDV * _v_N; 	// sum of aerodynamic forces
+	const Vector3f Fa_B = _R_S2B * Fa_ts - _KDV * v_B; 	// sum of aerodynamic forces
+	_Fa_N = _q.rotateVector(Fa_B);
 	_Ma_B = _R_S2B * Ma_ts - _KDW * _w_B; 	// aerodynamic moments
 }
 
@@ -401,8 +403,6 @@ Vector3f Sih::coriolisAcceleration(const Vector3f &velocity)
 
 void Sih::equations_of_motion(const float dt)
 {
-	_R_B2N = matrix::Dcm<float>(_q);
-
 	const float gravity_norm = computeGravity(_lat);
 	gravity = Vector3f(_R_N2E.col(2)) * gravity_norm;
 	Vector3f coriolis = coriolisAcceleration(_v_E);
@@ -599,7 +599,7 @@ void Sih::send_dist_snsr(const hrt_abstime &time_now_us)
 		distance_sensor.current_distance = _distance_snsr_override;
 
 	} else {
-		distance_sensor.current_distance = -_lpos(2) / _R_B2N(2, 2);
+		distance_sensor.current_distance = -_lpos(2) / _q.dcm_z()(2);
 
 		if (distance_sensor.current_distance > _distance_snsr_max) {
 			// this is based on lightware lw20 behaviour

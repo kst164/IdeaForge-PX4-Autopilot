@@ -199,7 +199,6 @@ private:
 	bool        _grounded{true};// whether the vehicle is on the ground
 
 	matrix::Vector3f    _T_B{};           // thrust force in body frame [N]
-	matrix::Vector3f    _Fa_N{};          // aerodynamic force in local navigation frame [N]
 	matrix::Vector3f    _Mt_B{};          // thruster moments in the body frame [Nm]
 	matrix::Vector3f    _Ma_B{};          // aerodynamic moments in the body frame [Nm]
 	matrix::Vector3f    _lpos{};          // position in a local tangent-plane frame [m]
@@ -213,6 +212,7 @@ private:
 	double              _alt{0.0};
 
 	// Quantities in Earth-centered-Earth-fixed coordinates
+	matrix::Vector3f    _Fa_E{};          // aerodynamic force in ECEF frame [N]
 	matrix::Vector3f    _gravity_E{};
 	matrix::Quatf       _q_E{};
 	matrix::Vector3d    _p_E{};

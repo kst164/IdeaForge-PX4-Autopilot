@@ -321,7 +321,7 @@ void Sih::generate_force_and_torques()
 		_Mt_B = Vector3f(_L_ROLL * _T_MAX * (-_u[0] + _u[1] + _u[2] - _u[3]),
 				 _L_PITCH * _T_MAX * (+_u[0] - _u[1] + _u[2] - _u[3]),
 				 _Q_MAX * (+_u[0] + _u[1] - _u[2] - _u[3]));
-		_Fa_N = -_KDV * _v_N;   // first order drag to slow down the aircraft
+		_Fa_E = -_KDV * _v_E;   // first order drag to slow down the aircraft
 		_Ma_B = -_KDW * _w_B;   // first order angular damper
 
 	} else if (_vehicle == VehicleType::FW) {
@@ -335,7 +335,7 @@ void Sih::generate_force_and_torques()
 		_Mt_B = Vector3f(_L_ROLL * _T_MAX * (_u[1] - _u[0]), 0.0f, _Q_MAX * (_u[1] - _u[0]));
 		generate_ts_aerodynamics();
 
-		// _Fa_N = -_KDV * _v_N;   // first order drag to slow down the aircraft
+		// _Fa_E = -_KDV * _v_E;   // first order drag to slow down the aircraft
 		// _Ma_B = -_KDW * _w_B;   // first order angular damper
 	}
 }
@@ -353,7 +353,7 @@ void Sih::generate_fw_aerodynamics()
 	// sum of aerodynamic forces
 	const Vector3f Fa_B = _wing_l.get_Fa() + _wing_r.get_Fa() + _tailplane.get_Fa() + _fin.get_Fa() + _fuselage.get_Fa() -
 			      _KDV * v_B;
-	_Fa_N = _q.rotateVector(Fa_B);
+	_Fa_E = _q_E.rotateVector(Fa_B);
 
 	// aerodynamic moments
 	_Ma_B = _wing_l.get_Ma() + _wing_r.get_Ma() + _tailplane.get_Ma() + _fin.get_Ma() + _fuselage.get_Ma() - _KDW * _w_B;
@@ -385,7 +385,7 @@ void Sih::generate_ts_aerodynamics()
 	}
 
 	const Vector3f Fa_B = _R_S2B * Fa_ts - _KDV * v_B; 	// sum of aerodynamic forces
-	_Fa_N = _q.rotateVector(Fa_B);
+	_Fa_E = _q_E.rotateVector(Fa_B);
 	_Ma_B = _R_S2B * Ma_ts - _KDW * _w_B; 	// aerodynamic moments
 }
 
@@ -401,9 +401,8 @@ float Sih::computeGravity(const double lat)
 void Sih::equations_of_motion(const float dt)
 {
 	_gravity_E = Vector3f(_R_N2E.col(2)) * computeGravity(_lat); // assume gravity along the Down axis
-	const Vector3f coriolis_E = 2.f * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE).cross(_v_E);
 
-	_v_E_dot = _gravity_E + coriolis_E + (_R_N2E * _Fa_N + _q_E.rotateVector(_T_B)) / _MASS;
+	_v_E_dot = _gravity_E + (_Fa_E + _q_E.rotateVector(_T_B)) / _MASS;
 	_v_N_dot = _R_N2E.transpose() * _v_E_dot;
 
 	// fake ground, avoid free fall
@@ -731,9 +730,9 @@ int Sih::print_status()
 	}
 
 	PX4_INFO("vehicle landed: %d", _grounded);
-	PX4_INFO("inertial position NED (m)");
+	PX4_INFO("local position NED (m)");
 	_lpos.print();
-	PX4_INFO("inertial velocity NED (m/s)");
+	PX4_INFO("local velocity NED (m/s)");
 	_v_N.print();
 	PX4_INFO("attitude roll-pitch-yaw (deg)");
 	(Eulerf(_q) * 180.0f / M_PI_F).print();
@@ -742,8 +741,8 @@ int Sih::print_status()
 	PX4_INFO("actuator signals");
 	Vector<float, 8> u = Vector<float, 8>(_u);
 	u.transpose().print();
-	PX4_INFO("Aerodynamic forces NED inertial (N)");
-	_Fa_N.print();
+	PX4_INFO("Aerodynamic forces NED (N)");
+	(_R_N2E.transpose() * _Fa_E).print();
 	PX4_INFO("Aerodynamic moments body frame (Nm)");
 	_Ma_B.print();
 	PX4_INFO("Thruster moments in body frame (Nm)");

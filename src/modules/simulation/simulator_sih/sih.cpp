@@ -242,7 +242,8 @@ void Sih::parameters_updated()
 	_KDV = _sih_kdv.get();
 	_KDW = _sih_kdw.get();
 
-	if ((fabsf(static_cast<float>(_lpos_ref.getProjectionReferenceLat()) - _sih_lat0.get()) > FLT_EPSILON)
+	if (!_lpos_ref.isInitialized()
+	    || (fabsf(static_cast<float>(_lpos_ref.getProjectionReferenceLat()) - _sih_lat0.get()) > FLT_EPSILON)
 	    || (fabsf(static_cast<float>(_lpos_ref.getProjectionReferenceLon()) - _sih_lon0.get()) > FLT_EPSILON)
 	    || (fabsf(_lpos_ref_alt - _sih_h0.get()) > FLT_EPSILON)) {
 		_lpos_ref.initReference(static_cast<double>(_sih_lat0.get()), static_cast<double>(_sih_lon0.get()));

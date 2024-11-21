@@ -214,6 +214,7 @@ private:
 	// Quantities in Earth-centered-Earth-fixed coordinates
 	matrix::Vector3f    _Fa_E{};          // aerodynamic force in ECEF frame [N]
 	matrix::Vector3f    _gravity_E{};
+	matrix::Vector3f    _coriolis_E{};
 	matrix::Quatf       _q_E{};
 	matrix::Vector3d    _p_E{};
 	matrix::Vector3f    _v_E{};

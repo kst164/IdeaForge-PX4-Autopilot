@@ -343,12 +343,11 @@ void Sih::generate_force_and_torques()
 void Sih::generate_fw_aerodynamics()
 {
 	const Vector3f v_B = _q_E.rotateVectorInverse(_v_E);
-	float altitude = _lpos_ref_alt - _lpos(2);
-	_wing_l.update_aero(v_B, _w_B, altitude, _u[0]*FLAP_MAX);
-	_wing_r.update_aero(v_B, _w_B, altitude, -_u[0]*FLAP_MAX);
-	_tailplane.update_aero(v_B, _w_B, altitude, _u[1]*FLAP_MAX, _T_MAX * _u[3]);
-	_fin.update_aero(v_B, _w_B, altitude, _u[2]*FLAP_MAX, _T_MAX * _u[3]);
-	_fuselage.update_aero(v_B, _w_B, altitude);
+	_wing_l.update_aero(v_B, _w_B, _alt, _u[0]*FLAP_MAX);
+	_wing_r.update_aero(v_B, _w_B, _alt, -_u[0]*FLAP_MAX);
+	_tailplane.update_aero(v_B, _w_B, _alt, _u[1]*FLAP_MAX, _T_MAX * _u[3]);
+	_fin.update_aero(v_B, _w_B, _alt, _u[2]*FLAP_MAX, _T_MAX * _u[3]);
+	_fuselage.update_aero(v_B, _w_B, _alt);
 
 	// sum of aerodynamic forces
 	const Vector3f Fa_B = _wing_l.get_Fa() + _wing_r.get_Fa() + _tailplane.get_Fa() + _fin.get_Fa() + _fuselage.get_Fa() -
@@ -401,9 +400,10 @@ float Sih::computeGravity(const double lat)
 void Sih::equations_of_motion(const float dt)
 {
 	_gravity_E = Vector3f(_R_N2E.col(2)) * computeGravity(_lat); // assume gravity along the Down axis
+	_coriolis_E = -2.f * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE).cross(_v_E);
 
-	_v_E_dot = _gravity_E + (_Fa_E + _q_E.rotateVector(_T_B)) / _MASS;
-	_v_N_dot = _R_N2E.transpose() * _v_E_dot;
+	_v_E_dot = _gravity_E + _coriolis_E + (_Fa_E + _q_E.rotateVector(_T_B)) / _MASS;
+	_v_N_dot = _R_N2E.transpose() * _v_E_dot; //TODO: add transport rate
 
 	// fake ground, avoid free fall
 	double vertical_acc = Vector3d(_v_E_dot(0), _v_E_dot(1), _v_E_dot(2)).dot(_p_E) / _p_E.norm();
@@ -540,11 +540,11 @@ void Sih::reconstruct_sensors_signals(const hrt_abstime &time_now_us)
 	// IMU
 	const Dcmf R_E2B(_q_E.inversed());
 
-	Vector3f specific_force_B = R_E2B * (_v_E_dot - _gravity_E);
-	Vector3f acc = specific_force_B + noiseGauss3f(0.5f, 1.7f, 1.4f);
+	Vector3f specific_force_B = R_E2B * (_v_E_dot - _gravity_E - _coriolis_E);
+	Vector3f acc = specific_force_B + noiseGauss3f(0.1f, 0.1f, 0.1f);
 
 	const Vector3f earth_spin_rate_B = R_E2B * Vector3f(0.f, 0.f, CONSTANTS_EARTH_SPIN_RATE);
-	Vector3f gyro = _w_B + earth_spin_rate_B + noiseGauss3f(0.14f, 0.07f, 0.03f);
+	Vector3f gyro = _w_B + earth_spin_rate_B + noiseGauss3f(0.01f, 0.01f, 0.0f);
 
 	// update IMU every iteration
 	_px4_accel.update(time_now_us, acc(0), acc(1), acc(2));

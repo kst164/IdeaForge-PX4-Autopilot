@@ -160,5 +160,8 @@ subscriptions:
   - topic: /fmu/in/aux_global_position
     type: px4_msgs::msg::VehicleGlobalPosition
 
+  - topic: /fmu/in/motor_failure_emulation
+    type: px4_msgs::msg::MotorFailureEmulation
+
 # Create uORB::PublicationMulti
 subscriptions_multi:

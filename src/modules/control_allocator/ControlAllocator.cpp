@@ -692,6 +692,17 @@ ControlAllocator::publish_actuator_controls()
 		actuator_motors.control[i] = NAN;
 	}
 
+	// Listen for motor failure
+	if (_motor_failure_emulation_sub.updated()) {
+		motor_failure_emulation_s mfe;
+		_motor_failure_emulation_sub.copy(&mfe);
+		failed_motor = mfe.motor_to_fail;
+		PX4_INFO("Failing motor %d\n", failed_motor);
+	}
+	if (failed_motor) {
+		actuator_motors.control[failed_motor - 1] = 0.0;
+	}
+
 	_actuator_motors_pub.publish(actuator_motors);
 
 	// servos

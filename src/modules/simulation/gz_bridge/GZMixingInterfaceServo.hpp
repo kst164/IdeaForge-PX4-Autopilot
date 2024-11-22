@@ -36,6 +36,7 @@
 #include <lib/mixer_module/mixer_module.hpp>
 
 #include <gz/transport.hh>
+#include <px4_platform_common/module_params.h>
 
 // GZBridge mixing class for Servos.
 // It is separate from GZBridge to have separate WorkItems and therefore allowing independent scheduling
@@ -66,9 +67,27 @@ private:
 	friend class GZBridge;
 
 	void Run() override;
+	float get_max(const size_t index);
+	float get_min(const size_t index);
 
 	gz::transport::Node &_node;
 	pthread_mutex_t &_node_mutex;
+
+	std::vector<double> _output_min_angle_rad;
+	std::vector<double> _output_angular_range_rad;
+
+	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::CA_SV_TL0_MAXA>) _ca_sv_tl_max_a_1,
+		(ParamFloat<px4::params::CA_SV_TL0_MINA>) _ca_sv_tl_min_a_1,
+		(ParamFloat<px4::params::CA_SV_TL1_MAXA>) _ca_sv_tl_max_a_2,
+		(ParamFloat<px4::params::CA_SV_TL1_MINA>) _ca_sv_tl_min_a_2,
+		(ParamFloat<px4::params::CA_SV_TL2_MAXA>) _ca_sv_tl_max_a_3,
+		(ParamFloat<px4::params::CA_SV_TL2_MINA>) _ca_sv_tl_min_a_3,
+		(ParamFloat<px4::params::CA_SV_TL3_MAXA>) _ca_sv_tl_max_a_4,
+		(ParamFloat<px4::params::CA_SV_TL3_MINA>) _ca_sv_tl_min_a_4,
+		(ParamInt<px4::params::CA_SV_CS_COUNT>) _ca_sv_cs_count,
+		(ParamInt<px4::params::CA_SV_TL_COUNT>) _ca_sv_tl_count
+	)
 
 	MixingOutput _mixing_output{"SIM_GZ_SV", MAX_ACTUATORS, *this, MixingOutput::SchedulingPolicy::Auto, false, false};
 

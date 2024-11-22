@@ -33,6 +33,41 @@
 
 #include "GZMixingInterfaceServo.hpp"
 
+#define DEFAULT_MAX (1.)
+#define DEFAULT_MIN (-1.)
+
+float
+GZMixingInterfaceServo::get_min(const size_t index)
+{
+	switch (index) {
+	case 0: return _ca_sv_tl_min_a_1.get();
+
+	case 1: return _ca_sv_tl_min_a_2.get();
+
+	case 2: return _ca_sv_tl_min_a_3.get();
+
+	case 3: return _ca_sv_tl_min_a_4.get();
+
+	default: return 0.f;
+	}
+}
+
+float
+GZMixingInterfaceServo::get_max(const size_t index)
+{
+	switch (index) {
+	case 0: return _ca_sv_tl_max_a_1.get();
+
+	case 1: return _ca_sv_tl_max_a_2.get();
+
+	case 2: return _ca_sv_tl_max_a_3.get();
+
+	case 3: return _ca_sv_tl_max_a_4.get();
+
+	default: return 0.f;
+	}
+}
+
 bool GZMixingInterfaceServo::init(const std::string &model_name)
 {
 	// /model/rascal_110_0/servo_2
@@ -46,6 +81,15 @@ bool GZMixingInterfaceServo::init(const std::string &model_name)
 			PX4_ERR("failed to advertise %s", servo_topic.c_str());
 			return false;
 		}
+
+
+		bool is_tilt_rotor = (i > _ca_sv_cs_count.get() - 1) && (i < _ca_sv_cs_count.get() + _ca_sv_tl_count.get());
+		double max_val = is_tilt_rotor ? math::radians((double)get_max(i - _ca_sv_cs_count.get())) : DEFAULT_MAX;
+		double min_val = is_tilt_rotor ? math::radians((double)get_min(i - _ca_sv_cs_count.get())) : DEFAULT_MIN;
+
+		double range = math::abs_t(max_val - min_val);
+		_output_min_angle_rad.push_back(min_val);
+		_output_angular_range_rad.push_back(range);
 	}
 
 	ScheduleNow();
@@ -64,8 +108,10 @@ bool GZMixingInterfaceServo::updateOutputs(bool stop_motors, uint16_t outputs[MA
 	for (auto &servo_pub : _servos_pub) {
 		if (_mixing_output.isFunctionSet(i)) {
 			gz::msgs::Double servo_output;
-			///TODO: Normalize output data
-			double output = (outputs[i] - 500) / 500.0;
+
+			double range = _mixing_output.maxValue(i) - _mixing_output.minValue(i);
+			double output = _output_min_angle_rad[i] + (double)outputs[i] / range * _output_angular_range_rad[i];
+
 			// std::cout << "outputs[" << i << "]: " << outputs[i] << std::endl;
 			// std::cout << "  output: " << output << std::endl;
 			servo_output.set_data(output);

@@ -1,0 +1,12 @@
+menuconfig MODULES_FAILURE_DETECTION
+	bool "failure_detection"
+	default n
+	---help---
+		Enable support for failure_detection
+
+menuconfig USER_FAILURE_DETECTION
+	bool "control_allocator running as userspace module"
+	default y
+	depends on BOARD_PROTECTED && MODULES_FAILURE_DETECTION
+	---help---
+		Put failure_detection in userspace memory

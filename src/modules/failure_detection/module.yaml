@@ -1,0 +1,17 @@
+module_name: FailureDetection
+
+parameters:
+    - group: FailureDetection
+      definitions:
+        OV_FAIL_DETECT:
+          description:
+            short: Override detection when emulating failure
+            long: |
+              If enabled, motor_failure_detection will instantly trigger when
+              motor_failure_emulation is triggered, regardless of the actual
+              state of the detector.
+
+              This is useful for testing the control system independently of
+              the failure detection system.
+          type: boolean
+          default: false

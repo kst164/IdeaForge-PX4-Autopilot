@@ -196,7 +196,8 @@ private:
 
 	uORB::Subscription _motor_failure_emulation_sub{ORB_ID(motor_failure_emulation)};
 	uORB::Subscription _motor_failure_detection_sub{ORB_ID(motor_failure_detection)};
-	uint8_t failed_motor;
+	uint8_t _failed_motor;
+	uint8_t _detected_motor;
 
 	matrix::Vector3f _torque_sp;
 	matrix::Vector3f _thrust_sp;

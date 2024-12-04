@@ -696,14 +696,26 @@ ControlAllocator::publish_actuator_controls()
 	if (_motor_failure_emulation_sub.updated()) {
 		motor_failure_emulation_s mfe;
 		_motor_failure_emulation_sub.copy(&mfe);
-		failed_motor = mfe.motor_to_fail;
-		PX4_INFO("Failing motor %d\n", failed_motor);
+		_failed_motor = mfe.motor_to_fail;
+		PX4_INFO("Failing motor %d\n", _failed_motor);
 	}
-	if (failed_motor) {
-		actuator_motors.control[failed_motor - 1] = 0.0;
+	if (_failed_motor) {
+		actuator_motors.control[_failed_motor - 1] = 0.0;
 	}
 
-	_actuator_motors_pub.publish(actuator_motors);
+	if (_motor_failure_detection_sub.updated()) {
+		motor_failure_detection_s mfd;
+		_motor_failure_detection_sub.copy(&mfd);
+		_detected_motor = mfd.failed_motor;
+		if (mfd.failed_motor) {
+			PX4_INFO("Shutting down control_allocator\n");
+			// request_stop();
+		}
+	}
+
+	if (_detected_motor) {
+		return;
+	}
 
 	// servos
 	if (_num_actuators[1] > 0) {

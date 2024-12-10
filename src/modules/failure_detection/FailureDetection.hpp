@@ -95,6 +95,9 @@ private:
 
 	Detector _detector;
 
+	hrt_abstime _thousand_samples_time{0};
+	int _thousand_samples_count{-1};
+
 	// Detector detector;
 
 	// Performance (perf) counters

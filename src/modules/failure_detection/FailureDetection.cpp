@@ -90,14 +90,15 @@ void FailureDetection::Run()
 			int failed = motor_failure_emulation.motor_to_fail;
 			if (failed) {
 				PX4_INFO("Failure emulation detected\n");
+				// request_stop();
 				// for testing failure control, we can trigger the detector here.
 
 				// otherwise, detector runs as usual
 
 				if (_param_ov_fail_detect.get()) {
 					// detector.handle(motor_failure_emulation);
-					_failed_motor = failed;
-					publish_motor_failure_detection();
+					// _failed_motor = failed;
+					// publish_motor_failure_detection();
 					// request_stop();
 				}
 			}
@@ -118,6 +119,17 @@ void FailureDetection::Run()
 			};
 			// PX4_INFO("%f %f %f %f %f %f\n", (double) signals[0], (double) signals[1], (double) signals[2], (double) signals[3], (double) signals[4], (double) signals[5]);
 			_failed_motor = _detector.check_failure_now(signals, combined.timestamp);
+		}
+
+		if (_thousand_samples_count == -1) {
+			_thousand_samples_time = combined.timestamp;
+			_thousand_samples_count = 0;
+		}
+
+		_thousand_samples_count++;
+		if (_thousand_samples_count == 1000) {
+			_thousand_samples_count = -1;
+			PX4_INFO("1000 samples took %f s\n", (double) ((combined.timestamp - _thousand_samples_time) / 1e6f));
 		}
 	}
 

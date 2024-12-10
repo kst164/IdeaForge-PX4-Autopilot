@@ -709,13 +709,12 @@ ControlAllocator::publish_actuator_controls()
 		_detected_motor = mfd.failed_motor;
 		if (mfd.failed_motor) {
 			PX4_INFO("Shutting down control_allocator\n");
-			// request_stop();
+			request_stop();
+			return;
 		}
 	}
 
-	if (_detected_motor) {
-		return;
-	}
+	_actuator_motors_pub.publish(actuator_motors);
 
 	// servos
 	if (_num_actuators[1] > 0) {

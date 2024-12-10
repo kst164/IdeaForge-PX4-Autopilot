@@ -5,7 +5,7 @@
 #include <stdlib.h>
 
 namespace detector {
-const int N = 1000;
+const int N = 100;
 
 struct dequeue {
     float data[N];
@@ -90,7 +90,7 @@ public:
     int pos_count;
     int neg_count;
     int max_count;
-    const float threshold_grads[6] = {0.2, 0.2, 10, 0.01, 0.01, 0.01};
+    const float threshold_grads[6] = {0.1, 0.1, 10, 0.01, 0.01, 0.01};
     const float threshold_vals[6] = {10, 10, 10, 100, 100, 2};
 
     Detector() {
@@ -101,7 +101,7 @@ public:
 
         pos_count = 0;
         neg_count = 0;
-        max_count = 10;
+        max_count = 5;
     }
 
     uint8_t check_failure_now(float signal, float time, int index) {
@@ -117,18 +117,21 @@ public:
 
 
         float mean_value_abs = mean_abs(dq_s[index].data, N);
-        float mean_grad_abs = gradient(0, abs(dq_s[index].data[dq_s[index].front]), N - 1, abs(dq_s[index].data[dq_s[index].rear]));
+        float mean_grad_abs = gradient(0, abs(dq_s[index].data[dq_s[index].front]), N - max_count - 1, abs(dq_s[index].data[(dq_s[index].rear + N-max_count-1) % N]));
         float curr_grad_abs = gradient(dq_t[index].data[(N + dq_t[index].rear-1) % N], abs(dq_s[index].data[(N + dq_s[index].rear-1) % N]), dq_t[index].data[dq_t[index].rear], abs(dq_s[index].data[dq_s[index].rear]));
         float curr_grad = gradient(dq_t[index].data[(N + dq_t[index].rear-1) % N], dq_s[index].data[(N + dq_s[index].rear-1) % N], dq_t[index].data[dq_t[index].rear], dq_s[index].data[dq_s[index].rear]);
 
         if (abs(curr_grad_abs/mean_grad_abs) > threshold_grad && abs(dq_s[index].data[dq_s[index].rear]/mean_value_abs) > threshold_val) {
             count[index]++;
+            // PX4_INFO("high%d", index);
             if (curr_grad > 0) {
                 pos_count++;
             } else {
                 neg_count++;
             }
         } else {
+            // if (count[index])
+            //     PX4_INFO("unhigh%d", index);
             count[index] = 0;
             pos_count = 0;
             neg_count = 0;
@@ -149,7 +152,7 @@ public:
             count_ += check_failure_now(signals[i], time, i);
         }
 
-        if (count_ >= 2) {
+        if (count_ >= 1) {
             return 1;
         }
 

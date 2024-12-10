@@ -39,4 +39,4 @@ land_detector start multicopter
 
 failure_detection start
 
-failure_control start
+# failure_control start
